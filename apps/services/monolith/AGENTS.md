@@ -1,0 +1,418 @@
+# Monolith
+
+Backend del clon de Goodreads. NestJS + TypeORM + Postgres, en hexagonal.
+
+## Las cuatro capas
+
+Todo dentro de `src/modules/<nombre>/` está en una de estas cuatro carpetas. No
+hay una quinta, y el linter lo comprueba.
+
+| Capa | Qué es | Puede depender de |
+|---|---|---|
+| `domain` | Reglas, entidades, puertos de **escritura** | Nada. Ni el framework, ni otra capa, ni otro módulo |
+| `application` | Casos de uso, puertos de **lectura** | `domain`, `application` |
+| `infrastructure` | TypeORM, HTTP, adapters | Las tres |
+| `composition` | El wiring puerto→adapter | Las tres, y solo el wiring |
+
+Las flechas **están verificadas por `eslint-plugin-boundaries`**, que resuelve el
+grafo de imports real. No es una convención que se respeta por buena voluntad:
+si la violas, el error salta en el lint, y el mensaje explica qué hacer.
+
+Que el grafo se resuelva de verdad importa por dos casos que la comprobación
+por texto no pilla: `await import(...)` a otra capa, y un fichero mal nombrado
+que esquiva un patrón de ficheros.
+
+### Qué NO se testea
+
+`infrastructure`. Un test atado a TypeORM o a HTTP se rompe cuando cambia el
+adapter, que es justo lo que el puerto existe para evitar. Hay una regla que lo
+prohíbe.
+
+Los tests van en `domain` (modelos, value objects) y en `application` (flujos a
+través del caso de uso). `domain` se testea directamente: son funciones puras,
+y probarlas de forma directa es más barato y más claro que llegar a ellas a
+través de un caso de uso.
+
+## Tres decisiones que parecen errores y no lo son
+
+### 1. `domain` no importa de otro `domain`
+
+Está prohibido, incluso entre módulos del mismo proyecto. Cuando `review` necesite
+el nombre de un usuario, **hace dos peticiones**: una a `review` y otra a
+`user`, desde `application`. No importa el tipo.
+
+**El coste es real** y se paga solo en los puntos donde dos módulos se
+encuentran de verdad. A cambio, cualquier `domain` se puede leer y probar sin
+conocer el de al lado.
+
+Cuando el error de ESLint aparezca, la respuesta **no es** un `eslint-disable`.
+Es replantear la dependencia.
+
+### 2. `rating` y `review` son tablas separadas
+
+Aunque se pregunte si no bastaría con una. El test que lo decide: **¿puede un
+usuario calificar sin escribir reseña?** Sí, y es el caso mayoritario. Si la
+calificación viviera dentro de la reseña, cada una de esas calificaciones sería
+una reseña con el cuerpo vacío.
+
+Además, tiene tres consecuencias que la tabla única no resuelve bien:
+
+- **Ciclos de vida distintos.** Vuelves a calificar un libro tres años después.
+  Tu reseña de hace tres años no cambia, y su fecha no debería moverse.
+- **Reglas de validación distintas.** Las estrellas: entero de 1 a 5, siempre
+  presente. El cuerpo: longitud máxima, puede no existir.
+- **El agregado se calcula solo con calificaciones.** `average_rating` sale de
+  `ratings` y de nada más. Mezcladas, cada consulta del promedio tendría que
+  filtrar las filas sin cuerpo, y el índice se va al garete.
+
+```
+ratings   (user_id, work_id, stars, rated_at)      UNIQUE(user_id, work_id)
+reviews   (user_id, work_id, body, reviewed_at)    UNIQUE(user_id, work_id)
+```
+
+Si alguien califica y escribe reseña, son dos filas. Correcto: son dos hechos.
+Son dos agregados en el **mismo** módulo `review`, no dos módulos.
+
+### 3. `work` y `edition` no son lo mismo
+
+La distinción central del dominio bibliográfico, y no es opcional.
+
+- **`work`** (la obra): "Fantastic Mr. Fox". Título, descripción, autores,
+  materias. Sin ISBN, sin páginas.
+- **`edition`**: ISBN, editorial, idioma, número de páginas, portada.
+
+La misma obra tiene muchas ediciones con datos distintos. Comprobado en la API
+de OpenLibrary: *Fantastic Mr. Fox* tiene **161 ediciones**; la hebrea de 2005
+tiene 103 páginas y la inglesa de 2024 tiene 96.
+
+Van en el mismo módulo `catalog` porque una edición siempre apunta a una obra, y
+no hay caso de uso donde sean independientes. El autor, en cambio, tiene módulo
+propio: fecha de nacimiento y muerte, ficha propia.
+
+## Los módulos
+
+| Módulo | Qué hace | Tablas |
+|---|---|---|
+| `auth` | Login, contraseñas, tokens, guards | `credentials` |
+| `user` | Identidad: username, email | `users` |
+| `profile` | Cara pública: nombre, bio, avatar, ubicación | `profiles` |
+| `catalog` | Obras y ediciones, promedio asíncrono | `works`, `editions` |
+| `author` | Ficha de autor y su relación con las obras | `authors`, `author_works` |
+| `shelf` | Estados de lectura y listas | `shelves`, `shelf_entries` |
+| `review` | Calificaciones, reseñas, comentarios, likes | `ratings`, `reviews`, `review_comments`, `review_likes` |
+| `notifications` | Consumidores pasivos de eventos | `notifications` |
+
+### `user` y `profile` están separados a propósito
+
+No por tamaño: por ritmo de cambio. `user` guarda lo que lee el login y casi no
+cambia. `profile` guarda lo que cambia cada semana y se muestra a terceros.
+Juntos, cada edición de la bio toca la fila que el login lee, y tarde o temprano
+aparece un endpoint de perfil devolviendo datos de acceso.
+
+El *libro favorito* **no va en `profile`**. Es una relación con un libro, no un
+atributo del usuario: es lo mismo que una shelf. Si estuviera ahí, `profile`
+dependería de `catalog` para poder pintarse.
+
+### Comentarios y likes cuelgan de la reseña
+
+Ni de la calificación ni de la obra. En Goodreads también es así: quien likes
+algo puede hacerlo sin haber escrito.
+
+```
+review_comments -> reviews
+review_likes    -> reviews
+```
+
+El módulo se llama `review` y no `social` porque guarda lo que es hoy, y deja
+sitio para `follow` y `quote` cuando lleguen.
+
+### Fuera de scope
+
+No crees `follow`, `quote`, `activity`, `contracts/` ni `domain/events/`. Un
+módulo vacío es deuda, y `review` ya es el que más crece.
+
+## `composition/container.ts`
+
+Cada módulo tiene su composition root: el único sitio que ve las tres capas a la
+vez, porque su trabajo es atar un puerto de `domain` al adapter que lo implementa
+en `infrastructure`.
+
+Dos exports, y la separación es deliberada:
+
+```ts
+export const authBindings = [
+  { provide: PasswordHasherPort, useClass: BcryptPasswordHasherAdapter },
+  { provide: AuthTokenPort, useClass: JwtTokenAdapter },
+];
+
+export const authProviders = [
+  AuthService,
+  ...authBindings,
+  { provide: APP_GUARD, useClass: AuthGuard },
+];
+```
+
+`bindings` solo lleva puerto→adapter. `providers` añade services y guards.
+Separarlas permite montar el grafo en un test sin arrastrar el `APP_GUARD`
+global:
+
+```ts
+const moduleRef = await Test.createTestingModule({
+  providers: [...authBindings, AuthService],
+})
+  .overrideProvider(PasswordHasherPort)
+  .useValue<FakeHasher>(fakeHasher)
+  .compile();
+```
+
+Eso es lo que un contenedor tipo Koin daría y Nest no de otra forma: cambiar una
+implementación sin tocar la clase que la consume.
+
+`controllers`, `imports` y `exports` se quedan en `<módulo>.module.ts`. Son
+superficie pública, no wiring.
+
+**`container.ts` es una convención, no una regla del framework.** El módulo
+funciona igual con los bindings dentro de `providers: [...]`. Si el fichero
+empieza a acumular helpers o tipos que no son wiring, hay que vaciarlo: un
+composition root que mezcla cosas deja de serlo.
+
+## Eventos: primitivas, nunca entidades
+
+Un evento que cruza módulos lleva identificadores, no clases del emisor.
+
+```ts
+// MAL: el contrato depende del modelo de catalog
+export class BookRated {
+  constructor(readonly work: WorkProps, readonly stars: number) {}
+}
+
+// BIEN: el contrato es estable
+export class BookRated {
+  constructor(
+    readonly workId: string,
+    readonly userId: string,
+    readonly stars: number,
+    readonly ratedAt: Date,
+  ) {}
+}
+```
+
+Si el evento lleva `WorkProps`, cambiar el modelo de la obra obliga a tocar el
+evento y a todos los que lo escuchan. Con `workId`, quien escucha recibe un
+identificador y decide qué hacer.
+
+Es lo que permite que `catalog` recalcule su promedio sin que `review` sepa que
+existe un promedio.
+
+## `catalog` es un caché de OpenLibrary
+
+Los datos de lectura no se inventan: se leen de la API pública de OpenLibrary.
+Es el único módulo con un puerto contra un cliente externo.
+
+- Envía cabecera `User-Agent` con nombre de app y email de contacto: da 3 req/s
+  en lugar de 1.
+- Cachea. No es solo rendimiento, es lo que pide la API.
+- OpenLibrary dice explícitamente que sus APIs **no** son un backend para
+  terceros. No hay usuarios, ni reseñas, ni listas: eso lo escribimos nosotros.
+- Para carga inicial, los dumps mensuales. Nunca la API.
+
+## Consistencia asíncrona
+
+`average_rating` se recalcula escuchando `BookRated`, no bloqueando la escritura
+de una reseña con un `AVG()` sobre toda la tabla.
+
+El precio es una ventana de inconsistencia: el usuario califica y ve el promedio
+viejo unos segundos. No es un bug. En la interfaz se comunica como "se está
+actualizando".
+
+Con `rating` separada de `review`, el promedio sale solo de `ratings`, así que
+mantener la distribución por estrellas no cuesta nada.
+
+## Convenciones
+
+**Nombres de fichero**: *kebab-case* con sufijo de rol.
+`project-query.port.ts`, `credential.repository.ts`, `book-rated.event.ts`. No
+PascalCase.
+
+**Módulos**: singular. `shelf`, no `shelves`.
+
+**Puertos**: los que la *entidad* necesita para persistirse van en
+`domain/ports/`. Los que solo los *casos de uso* necesitan para consultar van en
+`application/ports/`.
+
+**Errores**: los de dominio (`BusinessException`, `ResourceNotFoundException`)
+vienen de `src/common/exceptions` y son framework-free. `AppException` extiende
+`Error`, no `HttpException`, precisamente para que el dominio no sepa que
+existe HTTP.
+
+## Trampas
+
+**Los `composition/container.ts` están vacíos**, y los `<módulo>.module.ts` no
+tienen controladores ni `imports`. Es el estado esperado: `pnpm start` levanta
+sin ninguna ruta hasta que escribas los bindings y las clases. No es un fallo.
+
+**`src/migrations/` no existe.** La crea el primer `pnpm migration:generate`.
+`data-source.ts` ya apunta a esa ruta.
+
+**`ADMINER_PORT` es del `compose`, no de la API.** Solo la lee
+`compose.yml`, para el puerto que publica Adminer. La API usa `PORT`.
+
+**`migration:generate` necesita su `path`.** El comando de `package.json` es
+`migration:generate -d src/database/data-source.ts`, pero el CLI exige además un
+argumento posicional con dónde escribir el fichero:
+
+```bash
+pnpm migration:generate src/migrations/Algo.ts
+```
+
+No es `pnpm migration:generate` a secas: falla con `Not enough non-option
+arguments`. Si añades un `&&` delante de un comando de TypeORM, **pnpm deja de
+reenviar los argumentos**, y el fallo vuelve a ser ese. Por eso la creación del
+schema está dentro de `data-source.ts` y no encadenada en el script.
+
+## El schema de Postgres
+
+`DB_SCHEMA` (`monolithschema`) es el schema donde caen las tablas. Lo leen los
+dos puntos de conexión, y ambos leen la misma variable para que no puedan
+separarse:
+
+- `src/database/database.module.ts`, para la aplicación.
+- `src/database/data-source.ts`, para el CLI de migraciones.
+
+**Pasar `schema` a TypeORM no crea el schema.** Solo le dice dónde leer y
+escribir. Y el CLI tampoco puede crearlo, porque su tabla `migrations` vive en
+el schema que todavía no existe: `relation "migrations" does not exist`, un
+error que no menciona el schema por ninguna parte.
+
+Por eso existe `src/database/ensure-schema.ts`, y por eso los dos puntos de
+conexión hacen `await ensureSchema()` **antes** de abrir su conexión. Se conecta
+con `pg` y no con TypeORM porque un `DataSource` con el schema configurado es
+justo lo que aún no se puede abrir.
+
+Dos detalles que no son evidentes:
+
+- **`data-source.ts` exporta una promesa, no un `DataSource`.** TypeORM 1.x hace
+  `await` sobre lo exportado, así que el orden se respeta. Si algún día se
+  cambia a `new DataSource(...)` directo, el schema deja de crearse.
+- **Sin `DB_SCHEMA` se usa el `public`**, que es el comportamiento anterior y no
+  un fallo. Vacío se traduce a `undefined` a propósito: `''` sería un schema
+  que se llama vacío.
+
+El nombre se valida con un patrón en vez de escaparse, porque va interpolado en
+el SQL (Postgres no permite parametrizar identificadores). Un `DB_SCHEMA` con un
+punto y coma falla al arrancar, con un mensaje que lo dice, en vez de crear algo
+raro en la base de datos.
+
+**Lo que NO se hace**: poner `search_path` en la conexión. TypeORM califica cada
+tabla con `"monolithschema"."nombre"` porque `escapePath` compara contra
+`searchSchema`, que sigue siendo `public`. Eso funciona para lo que genera
+TypeORM. Un `queryRunner.query()` escrito a mano **no** lleva calificador, así
+que ahí hay que escribir el schema explícito.
+
+## Consultar la base con tabularis
+
+Hay un cliente MCP (`tabularis`) registrado en opencode, con la conexión
+`monolithdb` ya guardada. Sirve para **inspeccionar**: qué tablas hay, qué
+índices, qué se ve después de una migración. **No** para cambiar el esquema: eso
+es cosa de `migration:generate`, y por algo está en modo de solo lectura.
+
+**Hay que pasar `schema` en cada llamada.** `list_tables` y `describe_table` lo
+admiten como parámetro, y **por defecto miran en `public`**, no en
+`monolithschema`:
+
+```
+list_tables(connection_id="monolithdb")                    -> public
+list_tables(connection_id="monolithdb", schema="monolithschema")  -> lo real
+```
+
+El MCP **no** puede fijar el schema una vez: está cableado por llamada. Y si se
+olvida, no hay error, se ve una lista vacía. Es el fallo más fácil de
+interpretar al revés: parece que la base está vacía cuando lo que se ha mirado
+es el schema equivocado.
+
+Por lo mismo, cualquier `run_query` debe cualificar a mano:
+
+```sql
+SELECT * FROM monolithschema.works;   -- sí
+SELECT * FROM works;                  -- busca en public: no existe
+```
+
+`SELECT current_schema()` devuelve `public`, que es la prueba de que la
+conexión no lleva `search_path`. Es coherente con lo de arriba: lo califica
+TypeORM, no la sesión.
+
+### Lo que expone
+
+| Herramienta | Para qué |
+|---|---|
+| `list_connections` | conexiones guardadas |
+| `list_databases` | bases de una conexión |
+| `list_tables` | tablas, con `schema` opcional |
+| `describe_table` | columnas, índices y FKs |
+| `run_query` | SQL arbitrario, **bloqueado si escribe** |
+
+En modo solo lectura, un `CREATE TABLE` se rechaza con `Query blocked by
+Tabularis read-only mode`. La lectura sigue funcionando con normalidad. Para
+desactivarlo: tabularis → Settings → MCP → Read-only mode.
+
+**`psql` sigue estando disponible** para lo que sea que el MCP no pueda hacer,
+como la conexión por socket o los `EXPLAIN`. Son la misma base: el MCP es una
+comodidad, no un sustituto.
+
+**El lint tarda unos 8 segundos.** Es a propósito: boundaries resuelve el grafo
+de imports en cada pasada. No lo declares roto ni lo saltees.
+
+**`pnpm start` sin Postgres** se queda reintentando la conexión. Es normal si el
+`compose up -d` no está levantado.
+
+## Verificar
+
+```bash
+pnpm build
+pnpm lint
+pnpm test
+pnpm gen:openapi    # regenera el openapi.json commiteado
+```
+
+## Contrato OpenAPI
+
+Hay un `openapi.json` **en la raíz del proyecto**, commiteado, que `web` usa
+para generar su cliente. Se regenera con:
+
+```bash
+pnpm gen:openapi
+```
+
+**Regenera y commitea el fichero cuando cambies una API.** Un contrato
+desactualizado en el repo genera clientes que ya no compilan contra el backend, y
+el error aparece muy lejos de su causa.
+
+### Por qué hay tres ficheros
+
+- **`scripts/generate-openapi.ts`** escribe el JSON. No llama a `listen()`, así
+  que no abre puerto.
+- **`src/openapi-spec.module.ts`** es `AppModule` **sin `DatabaseModule`**. Existe
+  por una razón concreta: `NestFactory.create` **conecta con Postgres aunque no
+  se llame a `listen()`**. Sin este módulo, generar el contrato exigiría una base
+  de datos levantada.
+- **`src/common/swagger/openapi-config.ts`** tiene el `DocumentBuilder`, y lo
+  comparten `main.ts` y el script. Si cada uno tuviera el suyo acabarían
+  desincronizados, y el `openapi.json` commiteado dejaría de describir lo que el
+  backend sirve.
+
+### Si añades un módulo, añádelo a los dos
+
+`OpenApiSpecModule` importa los módulos de negocio a mano, y eso es una
+duplicación con consecuencias: si creas un módulo y lo añades solo a
+`AppModule`, el `openapi.json` se queda viejo **sin que nada avise**. Si un
+endpoint no aparece en el fichero, mira primero si su módulo está en los dos.
+
+### Estado actual
+
+El contrato tiene **0 rutas y 1 esquema**. No hay controladores todavía, y el
+script avisa por consola cuando pasa. Es lo correcto, no un fallo: sirve para
+comprobar que la cadena funciona, y se llenará solo cuando existan endpoints.
+
+Lo mismo sirve en `/api` y `/api-json` mientras la app está en marcha, que es lo
+que hacía el proyecto `portfolio`. Ese proyecto genera los tipos contra el
+backend **andando**, lo que obliga a levantarlo; aquí no hace falta.
