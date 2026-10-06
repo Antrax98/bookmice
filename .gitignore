@@ -1,0 +1,23 @@
+# Solo lo que vive en la raíz del repo.
+#
+# Cada app tiene su propio `.gitignore` (el de `nest new` y el de
+# `create-next-app`), y no hace falta duplicar aquí lo que ya cubren. Lo que sí
+# hace falta es lo que un `.gitignore` de subdirectorio no puede ver: ficheros
+# nuevos en la raíz, que es donde nadie mira cuando escribe uno.
+
+# macOS
+.DS_Store
+
+# Editores
+.idea/
+*.swp
+*~
+
+# Entorno. Los `.env` de las apps ya están cubiertos por los suyos; esto cubre
+# el de la raíz, que es donde acaba cayendo el que alguien copia "para probar".
+.env
+.env.local
+.env.*.local
+
+# `.env.example` sí se versiona: es la documentación de qué variables existen.
+!.env.example
