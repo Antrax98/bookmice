@@ -168,6 +168,28 @@ arrancar, en vez de aceptarlo en silencio: un token que caduca en 3.6 segundos
 falla de la forma más difícil de diagnosticar que existe, porque funciona en el
 login y se cae al navegar.
 
+### `maxBytes` sale en el openapi como `maxLength`, y no son lo mismo
+
+`PASSWORD_LIMITS.maxBytes` (hoy **72**) limita la contraseña en **bytes**, porque
+es lo que acepta scrypt. Pero OpenAPI no tiene forma de expresar bytes, así que en
+`openapi.json` sale como `maxLength: 72`, y `maxLength` son **caracteres**.
+
+La consecuencia es real y no es un bug del contrato: una contraseña con `ñ` o con
+emoji puede pasar la validación del cliente y recibir un **400** del servidor. El
+cliente no puede evitarlo con el contrato, porque el contrato no dice la verdad
+con la precisión necesaria.
+
+Si cambias `PASSWORD_LIMITS.maxBytes`, esto hay que actualizarlo:
+
+- este párrafo, con el número nuevo
+- `apps/clients/web/CONTRATO.md`, que avisa de lo mismo desde el otro lado
+- el `openapi.json` commiteado, con `pnpm gen:openapi`
+
+**Y hay un test que lo vigila**, en `password.model.spec.ts`: lee el
+`openapi.json` y compara `maxLength` con `PASSWORD_LIMITS.maxBytes`. Si alguien
+cambia la constante y no regenera el contrato, el test falla solo, diciendo qué
+se rompió. Ese test es el aviso de verdad; este párrafo solo sirve a quien lea.
+
 ### Swagger **no** lo tapa el guard global
 
 `globalGuard: true` cierra todas las rutas, y `/api` y `/api-json` de Swagger

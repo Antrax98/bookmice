@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { Password, PASSWORD_LIMITS } from './password.model';
 import { DataValidationException } from '../../../../common/exceptions/data-validation.exception';
 
@@ -92,6 +95,37 @@ describe('Password.create', () => {
         expect.objectContaining({ field: 'password' }),
       ]);
     }
+  });
+});
+
+/**
+ * Que el `openapi.json` commiteado siga diciendo la verdad sobre la contraseña.
+ *
+ * `maxBytes` sale en el contrato como `maxLength`, y OpenAPI entiende
+ * caracteres. Si alguien sube `PASSWORD_LIMITS.maxBytes` y no regenera el
+ * contrato, el número del openapi se queda viejo y el cliente valida contra
+ * una regla que el servidor ya no cumple.
+ *
+ * Este test es el aviso de verdad: no depende de que nadie lea el
+ * `AGENTS.md`. Lee el fichero y compara.
+ */
+describe('el openapi.json y PASSWORD_LIMITS.maxBytes', () => {
+  const spec = JSON.parse(
+    readFileSync(resolve(__dirname, '../../../../../openapi.json'), 'utf8'),
+  ) as {
+    components: {
+      schemas: {
+        RegisterDto: {
+          properties: { password: { maxLength?: number } };
+        };
+      };
+    };
+  };
+
+  it('el maxLength del contrato es maxBytes', () => {
+    expect(spec.components.schemas.RegisterDto.properties.password.maxLength).toBe(
+      PASSWORD_LIMITS.maxBytes,
+    );
   });
 });
 
