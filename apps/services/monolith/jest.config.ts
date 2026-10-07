@@ -79,13 +79,22 @@ const config: Config = {
   // Está bien, pero conviene saberlo, porque si no el número parece arbitrario.
   // Aquí reparte en dos grupos:
   //
-  // - `global` -> el resto del núcleo, sin los modelos. Ahora: 100 / 83.33 /
-  //   100 / 100.
+  // - `global` -> lo que no reclama ningún glob, o sea `common/domain` y los
+  //   puertos de `domain`. Ahora: 100 / 100 / 100 / 100.
   // - el glob de `models` -> cada modelo **por separado**, no el agregado de la
-  //   carpeta. Ahora los dos al 100%: `user.model.ts` 100 / 100 / 100 / 100 y
-  //   `profile.model.ts` igual.
+  //   carpeta. Ahora los dos al 100%.
+  // - el glob de `use-cases` -> cada caso de uso por separado. Ahora
+  //   `create-user-with-profile.use-case.ts` en 100 / 75 / 100 / 100, y el 75
+  //   son 3 ramas de helpers de TypeScript, no código sin probar.
   //
-  // Por modelo y no por carpeta porque es lo que hace falta: un modelo nuevo
+  // Que el `global` esté al 100% y solo tenga 6 ramas **no** significa que
+  // vigile poco: quiere decir que ya no es el que hace el trabajo. El Aggregate
+  // es lo que más se relaja cuando todo lo demás sube, así que dejar el peso en
+  // los tres grupos es justo lo contrario de apoyarse en él. Cuando landing un
+  // módulo nuevo, su `domain/models` y sus `use-cases` entrarán por sus globs y
+  // el `global` irá creciendo con lo que sobre.
+  //
+  // Por modelo y no por carpeta porque es lo que hace falta: un fichero nuevo
   // con cero tests no baja el `global` si otros suben la media, así que el
   // `global` solo no lo detectaría. Con el glob, sí.
   coverageThreshold: {
@@ -105,31 +114,43 @@ const config: Config = {
       functions: 100,
       lines: 90,
     },
+    // Los casos de uso también llevan suelo propio, por el mismo motivo que los
+    // modelos: un caso de uso nuevo sin un solo test no baja el `global` si los
+    // demás están al 100%.
+    //
+    // `branches` está a 70 y no a 95 a propósito, y hay que entender por qué.
+    // **En cualquier fichero con decoradores, TypeScript mete 3 ramas que no
+    // son código nuestro**: los helpers `__decorate` y `__metadata`, que emite
+    // por fichero porque `emitDecoratorMetadata` está activo (Nest lo necesita
+    // para la inyección). El source map los atribuye a las líneas del
+    // constructor, así que parecen tuyas.
+    //
+    // Comprobado, no supuesto:
+    // - Quitar los *parameter properties* del constructor **no** las quita.
+    // - `useDefineForClassFields: false` **no** las quita.
+    // - `importHelpers: true` sí las saca del `dist`, pero ts-jest no lo
+    //   respeta, así que la métrica no se mueve. Por eso no está: añadir
+    //   `tslib` como dependencia para no ganar nada sería un peaje.
+    //
+    // El caso de uso tiene 12 ramas, de las cuales 3 son esos helpers. Con las
+    // 9 reales cubiertas está en 75%, y el suelo queda en 70 para tolerar una
+    // rama nueva sin romper el build.
+    './src/modules/*/application/use-cases/**/*.ts': {
+      statements: 95,
+      branches: 70,
+      functions: 100,
+      lines: 95,
+    },
   },
 
-  // ## Por qué `branches` se queda en 94.23% y no llega al 100%
+  // ## El 75% del caso de uso, y por qué no es un agujero
   //
-  // De 52 ramas hay 49 cubiertas, y **las 3 que faltan no son código nuestro**:
-  // son `user.service.ts` 44-45, los *parameter properties* del constructor
-  // (`private readonly users: UserRepositoryPort`). TypeScript los compila a un
-  // `cond-expr` e istanbul cuenta un brazo que ningún test alcanza.
-  //
-  // Se podrían cubrir renunciando a los parameter properties y escribiendo
-  // `private readonly users: UserRepositoryPort;` más `this.users = users` en el
-  // cuerpo del constructor. **No se ha hecho a propósito**: es degradar el
-  // código para mover una cifra, y lo que mide el número no mejora. Si algún día
-  // se acepta ese coste, se hace a conciencia y aquí se anota por qué.
-  //
-  // Antes de esto eran 6 las ramas inalcanzables, y 3 de ellas sí eran código
-  // muerto: `typeof x === 'string' ? x.trim() : ''` sobre un parámetro ya
-  // declarado `string`, en `User.normalizeUsername`, `User.normalizeEmail` y
-  // `Profile.normalizeText`. Eso se quitó.
-  //
-  // Y **no hay herramienta que lo impida**: se probó con
-  // `allowUnreachableCode: false` (que solo marca sentencias tras un `return`) y
-  // con `@typescript-eslint/no-unnecessary-condition` con tipos activados (que
-  // tampoco salta). Ver el comentario del `tsconfig.json`. La única defensa es
-  // la revisión, y por eso el código lleva escrito por qué no está el `typeof`.
+  // De 52 ramas hay 49 cubiertas. Las 3 que faltan están en
+  // `create-user-with-profile.use-case.ts`, y son los helpers `__decorate` y
+  // `__metadata` que TypeScript emite por fichero al usar decoradores con
+  // `emitDecoratorMetadata`. No son código del proyecto y ningún test puede
+  // cubrirlas. Está detallado en el umbral de `use-cases` de arriba, con lo que
+  // se probó y lo que no funcionó.
   //
   // ## Los dos tests que faltaban de verdad
   //

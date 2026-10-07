@@ -61,6 +61,12 @@ pertenece al caso de uso de otro fichero.
 
 El spec va al lado, con el mismo nombre, y describe `Clase.execute`.
 
+**`branches` va a salir en 75% y no es tu culpa.** Cualquier fichero con
+decoradores recibe 3 ramas de los helpers `__decorate` y `__metadata` de
+TypeScript, y el source map las atribuye a las líneas del constructor. Está
+explicado en *Cobertura de tests*, con las tres cosas que se probaron para
+quitarlas y por qué no funcionan. No reescribas el constructor para perseguirlas.
+
 > Esto empezó con un único caso de uso, así que el primer cambio fue un
 > renombrado y no una separación real. Se hizo igualmente para fijar la
 > convención antes de que siete módulos la copiaran.
@@ -508,27 +514,53 @@ Un fichero que casa con **cualquier** clave de umbral (path o glob) queda
 **fuera** del grupo `global`. O sea que `global` no es "todo lo recogido", es
 "todo lo recogido que ningún glob reclama".
 
-- `global` → el núcleo **sin los modelos**: 100 / 83.33 / 100 / 100.
-- el glob de `domain/models` → **cada modelo por separado**, no la carpeta.
-  Ahora los dos al **100%** en las cuatro métricas.
+Hay **tres grupos**, y el `global` ya no es el que hace el trabajo:
 
-Por modelo y no por carpeta porque un modelo nuevo con cero tests no baja el
-`global` si otros modelos suben la media. Con el glob, sí se detecta.
+- `global` → lo que ningún glob reclama: `common/domain` y los puertos de
+  `domain`. Ahora 100 en las cuatro.
+- `domain/models/**` → **cada modelo por separado**, no la carpeta. Los dos al
+  100%.
+- `application/use-cases/**` → **cada caso de uso por separado**. Ahora
+  `create-user-with-profile.use-case.ts` en 100 / **75** / 100 / 100.
 
-### Por qué `branches` se queda en 94.23%
+Por fichero y no por carpeta porque un fichero nuevo con cero tests no baja el
+`global` si los demás suben la media. Con el glob, sí se detecta. Que el
+`global` esté al 100% con solo 6 ramas no significa que vigile poco: significa
+que el peso está en los otros dos grupos, que es donde debe estar, porque el
+agregado es lo que más se relaja cuando todo lo demás sube.
 
-Las 3 ramas que faltan de 52 **no son código nuestro**: son los *parameter
-properties* del constructor de `CreateUserWithProfileUseCase` (46-47).
+### El 75% del caso de uso, y por qué no es un agujero
+
+De 52 ramas hay 49 cubiertas. Las 3 que faltan **no son código del proyecto**.
+
+Cada fichero con decoradores recibe de TypeScript los helpers `__decorate` y
+`__metadata`, porque `emitDecoratorMetadata` está activo (Nest lo necesita para
+la inyección). Esos helpers traen un `cond-expr` cada uno, y el source map los
+**atribuye a las líneas del constructor**, así que parecen tuyos:
 
 ```ts
-constructor(private readonly users: UserRepositoryPort, ...) {}
+// istanbul señala aquí L46-47, y el código de abajo es inocente
+constructor(
+  private readonly users: UserRepositoryPort,   // <- unmarked, pero no es suyo
 ```
 
-TypeScript compila eso a un `cond-expr` e istanbul cuenta un brazo que ningún
-test alcanza. Se cubrirían renunciando a los parameter properties y escribiendo
-el campo más `this.users = users` en el cuerpo. **No se ha hecho a propósito**:
-degrada el código para mover una cifra. Si algún día se acepta, se hace a
-conciencia.
+El caso de uso tiene 12 ramas: 9 reales, todas cubiertas, y 3 de helpers.
+
+**Se probaron tres cosas y ninguna funciona:**
+
+| Qué se probó | Resultado |
+|---|---|
+| Quitar los *parameter properties*, campos explícitos + `this.x = x` | **No quita las ramas** |
+| `"useDefineForClassFields": false` | **No quita las ramas** |
+| `"importHelpers": true` + `tslib` | Las saca del `dist`, pero **ts-jest no lo respeta** y la métrica no se mueve |
+
+Por eso el suelo de `branches` para los casos de uso está en **70**, y no en 95:
+9 de 12 son 75%, y 70 tolera una rama nueva sin romper el build.
+
+`importHelpers` sí reduce el código emitido en `dist`, así que algún día puede
+ tener sentido activarlo. Pero por sí solo **no arregla la cobertura**, y
+añadir `tslib` como dependencia runtime para no ganar nada en la métrica no
+compensa. Por eso no está.
 
 Antes eran 6, y 3 sí eran código muerto: `typeof x === 'string' ? x.trim() : ''`
 sobre un parámetro ya declarado `string`, en `User.normalizeUsername`,
