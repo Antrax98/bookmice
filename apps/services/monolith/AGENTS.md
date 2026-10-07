@@ -33,6 +33,38 @@ través del caso de uso). `domain` se testea directamente: son funciones puras,
 y probarlas de forma directa es más barato y más claro que llegar a ellas a
 través de un caso de uso.
 
+### Un caso de uso, una clase
+
+En `application/use-cases/` hay **una clase por caso de uso**, no un servicio por
+módulo. El fichero se llama con el verbo y el sufijo de rol, como los demás:
+
+```
+application/use-cases/create-user-with-profile.use-case.ts
+  → class CreateUserWithProfileUseCase { execute(...) }
+```
+
+Y el método se llama **`execute()`**, no una descripción. La clase *es* el caso
+de uso, así que repetirlo en el nombre de la función sería redundante.
+
+**Por qué, y no por gusto del dogma.** La razón concreta es `DataSource`:
+`CreateUserWithProfileUseCase` lo inyecta porque abre una transacción, pero un
+`updateProfile` o un `listShelves` no lo necesitarían. Con un `UserService`
+único, los tres arrastrarían la dependencia de TypeORM aunque no la usen. Aquí
+cada caso de uso declara lo que usa y nada más.
+
+La segunda razón son los tests: un controlador que solo actualiza el perfil no
+tiene que falsificar `dataSource.transaction` para montar su módulo.
+
+**El antipatrón es `UserService` con cinco métodos.** Se ve enseguida: si un
+método no usa ninguna dependencia del constructor, esa dependencia está de más y
+pertenece al caso de uso de otro fichero.
+
+El spec va al lado, con el mismo nombre, y describe `Clase.execute`.
+
+> Esto empezó con un único caso de uso, así que el primer cambio fue un
+> renombrado y no una separación real. Se hizo igualmente para fijar la
+> convención antes de que siete módulos la copiaran.
+
 ## Tres decisiones que parecen errores y no lo son
 
 ### 1. `domain` no importa de otro `domain`
@@ -198,19 +230,20 @@ export const authBindings = [
 ];
 
 export const authProviders = [
-  AuthService,
+  RegisterUseCase,
+  LoginUseCase,
   ...authBindings,
   { provide: APP_GUARD, useClass: AuthGuard },
 ];
 ```
 
-`bindings` solo lleva puerto→adapter. `providers` añade services y guards.
+`bindings` solo lleva puerto→adapter. `providers` añade casos de uso y guards.
 Separarlas permite montar el grafo en un test sin arrastrar el `APP_GUARD`
 global:
 
 ```ts
 const moduleRef = await Test.createTestingModule({
-  providers: [...authBindings, AuthService],
+  providers: [...authBindings, LoginUseCase],
 })
   .overrideProvider(PasswordHasherPort)
   .useValue<FakeHasher>(fakeHasher)
@@ -485,7 +518,7 @@ Por modelo y no por carpeta porque un modelo nuevo con cero tests no baja el
 ### Por qué `branches` se queda en 94.23%
 
 Las 3 ramas que faltan de 52 **no son código nuestro**: son los *parameter
-properties* del constructor de `UserService` (44-45).
+properties* del constructor de `CreateUserWithProfileUseCase` (46-47).
 
 ```ts
 constructor(private readonly users: UserRepositoryPort, ...) {}

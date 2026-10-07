@@ -1,7 +1,7 @@
 import type { Provider } from '@nestjs/common';
 import { ProfileQueryPort } from '../application/ports/profile-query.port';
 import { UserQueryPort } from '../application/ports/user-query.port';
-import { UserService } from '../application/services/user.service';
+import { CreateUserWithProfileUseCase } from '../application/use-cases/create-user-with-profile.use-case';
 import { ProfileRepositoryPort } from '../domain/ports/profile-repository.port';
 import { UserRepositoryPort } from '../domain/ports/user-repository.port';
 import { ProfileQueryAdapter } from '../infrastructure/repositories/profile-query.repository';
@@ -17,7 +17,7 @@ import { UserRepositoryAdapter } from '../infrastructure/repositories/user.repos
  *
  * `userBindings` va separada de `userProviders` para que un test pueda montar
  * el grafo con solo los bindings y sustituir el adapter que necesite, sin
- * arrastrar el `UserService` que no le interesa.
+ * arrastrar el `CreateUserWithProfileUseCase` que no le interesa.
  *
  * Los puertos de lectura son **dos** y no uno, aunque `user` y `profile` estén
  * en el mismo módulo. Es lo que impide que el endpoint de perfil devuelva el
@@ -32,4 +32,7 @@ export const userBindings: Provider[] = [
   { provide: ProfileQueryPort, useClass: ProfileQueryAdapter },
 ];
 
-export const userProviders: Provider[] = [UserService, ...userBindings];
+export const userProviders: Provider[] = [
+  CreateUserWithProfileUseCase,
+  ...userBindings,
+];

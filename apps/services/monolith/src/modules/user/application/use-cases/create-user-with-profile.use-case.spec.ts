@@ -1,13 +1,13 @@
 import { DataSource } from 'typeorm';
 import { Test } from '@nestjs/testing';
-import { UserService } from './user.service';
+import { CreateUserWithProfileUseCase } from './create-user-with-profile.use-case';
 import { UserRepositoryPort } from '../../domain/ports/user-repository.port';
 import { ProfileRepositoryPort } from '../../domain/ports/profile-repository.port';
 import { DataValidationException } from '../../../../common/exceptions/data-validation.exception';
 
 /**
- * Tests de `createUserWithProfile`, el único caso donde el módulo escribe en
- * dos tablas a la vez.
+ * Tests de `CreateUserWithProfileUseCase`, el único caso donde el módulo escribe
+ * en dos tablas a la vez.
  *
  * Se monta el grafo con los puertos sustituidos por dobles, no con la base de
  * datos: lo que se prueba aquí es la **coordinación** (que se pase el mismo
@@ -26,11 +26,11 @@ const userFalso = {
   updatedAt: new Date(),
 };
 
-describe('UserService.createUserWithProfile', () => {
+describe('CreateUserWithProfileUseCase.execute', () => {
   let guardados: Array<{ tabla: string; props: unknown; scope?: unknown }>;
   let userRepo: UserRepositoryPort;
   let profileRepo: ProfileRepositoryPort;
-  let service: UserService;
+  let createUser: CreateUserWithProfileUseCase;
 
   beforeEach(async () => {
     guardados = [];
@@ -82,18 +82,18 @@ describe('UserService.createUserWithProfile', () => {
 
     const moduleRef = await Test.createTestingModule({
       providers: [
-        UserService,
+        CreateUserWithProfileUseCase,
         { provide: UserRepositoryPort, useValue: userRepo },
         { provide: ProfileRepositoryPort, useValue: profileRepo },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
 
-    service = moduleRef.get(UserService);
+    createUser = moduleRef.get(CreateUserWithProfileUseCase);
   });
 
   it('escribe el usuario y su perfil', async () => {
-    await service.createUserWithProfile({
+    await createUser.execute({
       username: 'antrax_001',
       email: 'test@correo.com',
       isActive: true,
@@ -109,7 +109,7 @@ describe('UserService.createUserWithProfile', () => {
    * huérfano, que es exactamente lo que el método existe para evitar.
    */
   it('pasa el mismo scope a las dos escrituras', async () => {
-    await service.createUserWithProfile({
+    await createUser.execute({
       username: 'antrax_001',
       email: 'test@correo.com',
       isActive: true,
@@ -135,7 +135,7 @@ describe('UserService.createUserWithProfile', () => {
    * inventado.
    */
   it('persiste el perfil con su propio id y el userId real', async () => {
-    const { user } = await service.createUserWithProfile({
+    const { user } = await createUser.execute({
       username: 'antrax_001',
       email: 'test@correo.com',
       isActive: true,
@@ -164,14 +164,14 @@ describe('UserService.createUserWithProfile', () => {
 
     const moduleRef = await Test.createTestingModule({
       providers: [
-        UserService,
+        CreateUserWithProfileUseCase,
         { provide: UserRepositoryPort, useValue: userRepo },
         { provide: ProfileRepositoryPort, useValue: profileRepo },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
 
-    await moduleRef.get(UserService).createUserWithProfile({
+    await moduleRef.get(CreateUserWithProfileUseCase).execute({
       username: 'antrax_001',
       email: 'test@correo.com',
       isActive: true,
@@ -182,7 +182,7 @@ describe('UserService.createUserWithProfile', () => {
   });
 
   it('normaliza antes de guardar, no después', async () => {
-    await service.createUserWithProfile({
+    await createUser.execute({
       username: '  Antrax_001  ',
       email: '  Test@Correo.COM  ',
       isActive: true,
@@ -197,7 +197,7 @@ describe('UserService.createUserWithProfile', () => {
   });
 
   it('el perfil nace sin bio ni avatar, no con cadenas vacías', async () => {
-    await service.createUserWithProfile({
+    await createUser.execute({
       username: 'antrax_001',
       email: 'test@correo.com',
       isActive: true,
@@ -220,7 +220,7 @@ describe('UserService.createUserWithProfile', () => {
 
     const moduleRef = await Test.createTestingModule({
       providers: [
-        UserService,
+        CreateUserWithProfileUseCase,
         { provide: UserRepositoryPort, useValue: userRepo },
         { provide: ProfileRepositoryPort, useValue: profileRepo },
         { provide: DataSource, useValue: dataSource },
@@ -228,7 +228,7 @@ describe('UserService.createUserWithProfile', () => {
     }).compile();
 
     await expect(
-      moduleRef.get(UserService).createUserWithProfile({
+      moduleRef.get(CreateUserWithProfileUseCase).execute({
         username: 'corto',
         email: 'test@correo.com',
         isActive: true,

@@ -209,7 +209,7 @@ describe('Profile.createNew', () => {
   });
 
   // El perfil es la razón de mover la generación del id a la aplicación: con
-  // el id disponible antes de insertar, `createUserWithProfile` puede
+  // el id disponible antes de insertar, `CreateUserWithProfileUseCase` puede
   // construir el perfil entero con su `userId` real y validarlo antes de abrir
   // la transacción.
   it('aceita un userId real y lo conserva', () => {

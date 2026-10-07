@@ -14,7 +14,7 @@ import { UserProps, UserWithId } from '../interfaces/user.interface';
  * abriría la puerta a que alguien cambie el email desde dos sitios a la vez.
  *
  * `scope` es el handle de la transacción y es **opcional**: si no se pasa, el
- * repositorio usa el suyo. Existe porque `createUserWithProfile` tiene que
+ * repositorio usa el suyo. Existe porque `CreateUserWithProfileUseCase` tiene que
  * escribir el usuario y su perfil en la misma transacción, y en TypeORM eso se
  * hace pasando el mismo handle a las dos escrituras. La alternativa sería meter
  * la transacción dentro del repositorio, que es donde no pertenece: el

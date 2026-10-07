@@ -15,10 +15,10 @@ import {
 import { ProfileRepositoryPort } from '../../domain/ports/profile-repository.port';
 
 /**
- * El servicio de aplicación: coordina, no valida.
+ * Alta de usuario con su perfil. Coordina, no valida.
  *
  * La validación está en los modelos (`User.create`, `Profile.create`), y eso
- * es deliberado. Si el servicio la duplicara, habría dos reglas de username y
+ * es deliberado. Si el caso de uso la duplicara, habría dos reglas de username y
  * la que se olvidara de actualizar seguiría pasando los tests. Aquí solo se
  * llama a los modelos y se persiste lo que devuelven, ya normalizado.
  *
@@ -26,20 +26,22 @@ import { ProfileRepositoryPort } from '../../domain/ports/profile-repository.por
  * tienen. Un caso de uso que quisiera inventarse un id no compila. El id lo pone
  * `createNew` con `randomUUID()`.
  *
- * ## Por qué `user` y `profile` viven en el mismo módulo
+ * ## Por qué esto es una clase y no `UserService`
  *
- * Porque un usuario sin perfil no es un estado válido, y el módulo es el sitio
- * donde se hace cumplir esa invariante en vez de dejarla en una convención.
+ * Una clase por caso de uso, y no un servicio por módulo. La razón concreta es
+ * `DataSource`: este caso de uso lo necesita porque abre una transacción, pero
+ * un `updateProfile` o un `listShelves` no lo necesitarían, y con un servicio
+ * único los tres arrastrarían la dependencia de TypeORM. Aquí cada caso de uso
+ * declara lo que usa y nada más.
  *
- * Estaban separados con el argumento del "ritmo de cambio", que era falso: ya
- * están en tablas distintas, así que editar la bio nunca tocó la fila que lee
- * el login. Lo que sí protege la separación entre identidad de acceso y cara
- * pública son las **tablas**, y por eso los puertos de lectura siguen siendo
- * dos, no uno: un `UserQueryPort` único invitaría a devolver el email en el
- * mismo objeto que el nombre.
+ * La segunda razón son los tests: un controlador que solo actualiza el perfil no
+ * debería tener que falsificar `dataSource.transaction` para montar su módulo.
+ *
+ * Por qué `user` y `profile` viven en el mismo módulo está en el `AGENTS.md` y en
+ * el docblock de `user.module.ts`. No se repite aquí.
  */
 @Injectable()
-export class UserService {
+export class CreateUserWithProfileUseCase {
   constructor(
     private readonly users: UserRepositoryPort,
     private readonly profiles: ProfileRepositoryPort,
@@ -58,7 +60,7 @@ export class UserService {
    * acabar lanzando por un dato inválido que ya se podía comprobar es trabajo
    * tirado, y la transacción no es barata.
    */
-  async createUserWithProfile(
+  async execute(
     params: UserNewProps & Pick<ProfileNewProps, 'fullName'>,
   ): Promise<{ user: UserProps; profile: ProfileProps }> {
     // Los dos modelos se construyen **antes** de abrir la transacción, y por

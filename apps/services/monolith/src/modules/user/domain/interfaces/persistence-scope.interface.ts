@@ -1,7 +1,7 @@
 /**
  * El alcance de una transacción, visto desde el dominio.
  *
- * Existe porque `createUserWithProfile` necesita escribir dos tablas en la
+ * Existe porque `CreateUserWithProfileUseCase` necesita escribir dos tablas en la
  * misma transacción, y para eso hay que pasar el mismo handle a las dos
  * escrituras. Pero `domain` no puede importar TypeORM: si lo hiciera, dejaría
  * de ser framework-free, que es justo lo que lo hace testeable y legible por

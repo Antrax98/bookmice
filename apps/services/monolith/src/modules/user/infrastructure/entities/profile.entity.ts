@@ -27,7 +27,7 @@ export class ProfileEntity {
    * la relación en el diff del esquema, y eso ata la integridad referencial a
    * que la entidad la declare. Un esquema que no para de drift es peor que uno
    * sin integridad. La Integrity va en el caso de uso
-   * (`createUserWithProfile` usa transacción, y el borrado en cascada será
+   * (`CreateUserWithProfileUseCase` usa transacción, y el borrado en cascada será
    * explícito cuando exista `deleteUser`).
    *
    * Lo que sí resuelve es lo importante: `UNIQUE (user_id)` garantiza un
