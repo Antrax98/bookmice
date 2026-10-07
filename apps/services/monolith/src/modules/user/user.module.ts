@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProfileQueryPort } from './application/ports/profile-query.port';
 import { UserQueryPort } from './application/ports/user-query.port';
 import { userProviders } from './composition/container';
+import { UserCreationPort } from './domain/ports/user-creation.port';
 import { ProfileEntity } from './infrastructure/entities/profile.entity';
 import { UserEntity } from './infrastructure/entities/user.entity';
 
@@ -17,11 +18,16 @@ import { UserEntity } from './infrastructure/entities/user.entity';
  * `ProfileQueryPort` lo necesitará `review` (el nombre y el avatar de quien
  * escribe una reseña) y `UserQueryPort` lo necesitará `auth` (el login busca
  * por email o username). Siempre por el puerto, nunca importando el modelo.
+ *
+ * `UserCreationPort` lo necesita `auth` para el alta: `credentials` es tabla de
+ * `auth`, así que la transacción la abre `auth` y este puerto deja escribir
+ * usuario y perfil dentro de ella. Es el primer puerto de **escritura** que
+ * sale del módulo, y por eso lleva `scope`.
  */
 @Module({
   imports: [TypeOrmModule.forFeature([UserEntity, ProfileEntity])],
   controllers: [],
   providers: userProviders,
-  exports: [UserQueryPort, ProfileQueryPort],
+  exports: [UserQueryPort, ProfileQueryPort, UserCreationPort],
 })
 export class UserModule {}

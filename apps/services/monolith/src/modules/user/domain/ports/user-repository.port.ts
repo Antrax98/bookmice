@@ -1,4 +1,4 @@
-import { PersistenceScope } from '../interfaces/persistence-scope.interface';
+import { PersistenceScope } from '../../../../common/domain/persistence-scope.interface';
 import { UserProps, UserWithId } from '../interfaces/user.interface';
 
 /**

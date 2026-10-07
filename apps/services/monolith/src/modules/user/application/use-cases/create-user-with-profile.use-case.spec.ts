@@ -4,6 +4,7 @@ import { CreateUserWithProfileUseCase } from './create-user-with-profile.use-cas
 import { UserRepositoryPort } from '../../domain/ports/user-repository.port';
 import { ProfileRepositoryPort } from '../../domain/ports/profile-repository.port';
 import { DataValidationException } from '../../../../common/exceptions/data-validation.exception';
+import { PersistenceScope } from '../../../../common/domain/persistence-scope.interface';
 
 /**
  * Tests de `CreateUserWithProfileUseCase`, el único caso donde el módulo escribe
@@ -25,6 +26,26 @@ const userFalso = {
   createdAt: new Date(),
   updatedAt: new Date(),
 };
+
+/**
+ * El `scope` que `auth` pasará: el de su propia transacción, la que crea usuario,
+ * perfil y credenciales a la vez.
+ *
+ * Es un objeto **suyo**, con su `save` propio, para que los tests puedan
+ * comprobar la identidad con `toBe`. Un scope equivalentemente falso no serviría:
+ * dos objetos con el mismo comportamiento no demuestran que las escrituras caigan
+ * en la misma transacción, solo que se les pasó algo parecido.
+ */
+const scopeAjeno = {
+  save: jest.fn(() => Promise.resolve(userFalso)),
+} as unknown as PersistenceScope;
+
+/** Un `DataSource` que no debería tocar nada cuando le pasan un `scope`. */
+const dataSourceFalso = {
+  transaction: () => {
+    throw new Error('no debería abrir transacción: ya viene un scope de fuera');
+  },
+} as unknown as DataSource;
 
 describe('CreateUserWithProfileUseCase.execute', () => {
   let guardados: Array<{ tabla: string; props: unknown; scope?: unknown }>;
@@ -179,6 +200,103 @@ describe('CreateUserWithProfileUseCase.execute', () => {
     });
 
     expect(transaction).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * El `scope` de fuera es lo que va a usar `auth`: `credentials` es tabla suya,
+   * así que `auth` abre la transacción y este caso de uso escribe dentro.
+   */
+  describe('con un scope de fuera', () => {
+    /** El mismo `DataSource` del `beforeEach`, pero que delata si se le llama. */
+    const dataSourceQueSeVigila = () => {
+      const transaction = jest.fn();
+
+      return {
+        transaction,
+        dataSource: {
+          transaction: (cb: (m: unknown) => unknown) => {
+            transaction();
+            return Promise.resolve(
+              cb({ save: () => Promise.resolve(userFalso) }),
+            );
+          },
+        } as unknown as DataSource,
+      };
+    };
+
+    const montar = async (dataSource: DataSource) => {
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          CreateUserWithProfileUseCase,
+          { provide: UserRepositoryPort, useValue: userRepo },
+          { provide: ProfileRepositoryPort, useValue: profileRepo },
+          { provide: DataSource, useValue: dataSource },
+        ],
+      }).compile();
+
+      return moduleRef.get(CreateUserWithProfileUseCase);
+    };
+
+    // El más importante de los tres. Anidar transacciones no daría una más
+    // amplia: `auth` ya está dentro de la suya, y abrir otra aquí solo
+    //kgeneraría trabajo y dejaría el scope dentro de una transacción que se
+    // ignora. Es el fallo que haría que un alta quedara a medias sin que se viera.
+    it('NO abre su propia transacción', async () => {
+      const { transaction, dataSource } = dataSourceQueSeVigila();
+
+      const useCase = await montar(dataSource);
+      await useCase.execute(
+        {
+          username: 'antrax_001',
+          email: 'test@correo.com',
+          isActive: true,
+          fullName: 'Antrax',
+        },
+        scopeAjeno,
+      );
+
+      expect(transaction).not.toHaveBeenCalled();
+    });
+
+    // La otra mitad del contrato: si el scope no se propaga, las dos escrituras
+    // caen en transacciones distintas y la atomicidad del alta no existe, aunque
+    // `auth` sí creyera que sí.
+    it('escribe las dos filas en el scope que le llega', async () => {
+      const useCase = await montar(dataSourceFalso);
+
+      await useCase.execute(
+        {
+          username: 'antrax_001',
+          email: 'test@correo.com',
+          isActive: true,
+          fullName: 'Antrax',
+        },
+        scopeAjeno,
+      );
+
+      expect(guardados.map((g) => g.tabla)).toEqual(['users', 'profiles']);
+      for (const guardado of guardados) {
+        expect(guardado.scope).toBe(scopeAjeno);
+      }
+    });
+
+    it('sigue validando los modelos antes de escribir', async () => {
+      const useCase = await montar(dataSourceFalso);
+
+      await expect(
+        useCase.execute(
+          {
+            username: 'corto',
+            email: 'test@correo.com',
+            isActive: true,
+            fullName: 'Antrax',
+          },
+          scopeAjeno,
+        ),
+      ).rejects.toThrow(DataValidationException);
+
+      expect(guardados).toHaveLength(0);
+    });
   });
 
   it('normaliza antes de guardar, no después', async () => {

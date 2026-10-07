@@ -42,10 +42,25 @@ const config: Config = {
   //    probarlo no comprueba nada.
   //
   // Y hay una cuarta exclusión, que no es de capa sino de **naturaleza**: los
-  // ficheros que solo exportan tipos (`interfaces/`, `application/ports/`). Un
-  // `interface` no genera código, así que istanbul los puntúa a 0% sin que haya
-  // nada que probar. Dejarlos dentro pone filas al 0% en el informe que parecen
-  // un agujero y no lo son.
+  // ficheros que solo declaran contratos, sin una línea de lógica. Son dos
+  // familias:
+  //
+  // 1. Los que solo exportan **tipos** (`interfaces/`, `application/ports/` con
+  //    `interface`). Un `interface` no genera código, así que istanbul los
+  //    puntúa a 0% sin que haya nada que probar.
+  // 2. Los **puertos** (`*.port.ts`). Una `abstract class` con un método abstracto
+  //    sí genera una sentencia — la declaración de la clase — y esa sentencia
+  //    sale cubierta o a 0% **dependiendo de si algo la importó**, que es un
+  //    artefacto de carga, no cobertura.
+  //
+  // El caso 2 duele con `UserCreationPort`: lo implementa un adapter que vive
+  // en `infrastructure`, y `infrastructure` no se testea por arquitectura (hay
+  // una regla de ESLint que lo prohíbe). Así que nada lo carga nunca y el puerto
+  // sale al 0% sin que nadie haya escrito mal una línea.
+  //
+  // Excluirlos no esconde lógica: no hay lógica que cubrir. Lo que sí se vigila es
+  // que un puerto se **implemente**, y eso lo comprueba el arranque de Nest, que
+  // falla si falta un binding.
   //
   // Antes esto era `src/**/*.{ts,js}`, y el global daba 23%. No era que faltaran
   // tests: era que 64 ficheros entran en el número, 12 de ellos esqueletos
@@ -61,13 +76,14 @@ const config: Config = {
     'src/common/domain/**/*.ts',
     '!src/modules/*/domain/interfaces/**/*.ts',
     '!src/modules/*/application/ports/**/*.ts',
+    '!src/modules/*/domain/ports/**/*.port.ts',
   ],
 
   // Un umbral que hoy no se cumple es peor que no tener umbral: se acostumbra
   // uno a verlo rojo y a pasarlo por alto, y para entonces ya no vigila nada.
   //
   // Estos valores son un **suelo**, no un objetivo: están por debajo de la
-  // cobertura real (100 stmts / 94.23 branches / 100 funcs / 100 lines) y su
+  // cobertura real (100 stmts / 94.44 branches / 100 funcs / 100 lines) y su
   // trabajo es que la cobertura **no baje**.
   //
   // ## Cómo calcula jest los umbrales, que no es lo que parece
@@ -79,13 +95,13 @@ const config: Config = {
   // Está bien, pero conviene saberlo, porque si no el número parece arbitrario.
   // Aquí reparte en dos grupos:
   //
-  // - `global` -> lo que no reclama ningún glob, o sea `common/domain` y los
-  //   puertos de `domain`. Ahora: 100 / 100 / 100 / 100.
+  // - `global` -> lo que no reclama ningún glob, o sea `common/domain`. Ahora:
+  //   100 / 100 / 100 / 100.
   // - el glob de `models` -> cada modelo **por separado**, no el agregado de la
   //   carpeta. Ahora los dos al 100%.
   // - el glob de `use-cases` -> cada caso de uso por separado. Ahora
-  //   `create-user-with-profile.use-case.ts` en 100 / 75 / 100 / 100, y el 75
-  //   son 3 ramas de helpers de TypeScript, no código sin probar.
+  //   `create-user-with-profile.use-case.ts` en 100 / 78.57 / 100 / 100, y el
+  //   78.57 son las 3 ramas de helpers de TypeScript, no código sin probar.
   //
   // Que el `global` esté al 100% y solo tenga 6 ramas **no** significa que
   // vigile poco: quiere decir que ya no es el que hace el trabajo. El Aggregate
@@ -145,7 +161,7 @@ const config: Config = {
 
   // ## El 75% del caso de uso, y por qué no es un agujero
   //
-  // De 52 ramas hay 49 cubiertas. Las 3 que faltan están en
+  // De 54 ramas hay 51 cubiertas. Las 3 que faltan están en
   // `create-user-with-profile.use-case.ts`, y son los helpers `__decorate` y
   // `__metadata` que TypeScript emite por fichero al usar decoradores con
   // `emitDecoratorMetadata`. No son código del proyecto y ningún test puede

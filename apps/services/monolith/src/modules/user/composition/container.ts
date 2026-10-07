@@ -3,7 +3,9 @@ import { ProfileQueryPort } from '../application/ports/profile-query.port';
 import { UserQueryPort } from '../application/ports/user-query.port';
 import { CreateUserWithProfileUseCase } from '../application/use-cases/create-user-with-profile.use-case';
 import { ProfileRepositoryPort } from '../domain/ports/profile-repository.port';
+import { UserCreationPort } from '../domain/ports/user-creation.port';
 import { UserRepositoryPort } from '../domain/ports/user-repository.port';
+import { UserCreationAdapter } from '../infrastructure/adapters/user-creation.adapter';
 import { ProfileQueryAdapter } from '../infrastructure/repositories/profile-query.repository';
 import { ProfileRepositoryAdapter } from '../infrastructure/repositories/profile.repository';
 import { UserQueryAdapter } from '../infrastructure/repositories/user-query.repository';
@@ -26,6 +28,7 @@ import { UserRepositoryAdapter } from '../infrastructure/repositories/user.repos
  */
 
 export const userBindings: Provider[] = [
+  { provide: UserCreationPort, useClass: UserCreationAdapter },
   { provide: UserRepositoryPort, useClass: UserRepositoryAdapter },
   { provide: UserQueryPort, useClass: UserQueryAdapter },
   { provide: ProfileRepositoryPort, useClass: ProfileRepositoryAdapter },

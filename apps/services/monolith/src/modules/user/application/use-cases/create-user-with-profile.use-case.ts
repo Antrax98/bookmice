@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { PersistenceScope } from '../../domain/interfaces/persistence-scope.interface';
+import { PersistenceScope } from '../../../../common/domain/persistence-scope.interface';
 import {
   UserNewProps,
   UserProps,
@@ -59,9 +59,22 @@ export class CreateUserWithProfileUseCase {
    * Los modelos se validan **antes** de abrir la transacción: abrirla para
    * acabar lanzando por un dato inválido que ya se podía comprobar es trabajo
    * tirado, y la transacción no es barata.
+   *
+   * ## El `scope` de fuera
+   *
+   * `auth` tiene que crear usuario, perfil y credenciales en la misma
+   * transacción, y `credentials` es tabla suya. Así que el que abre la
+   * transacción es `auth`, y este caso de uso recibe su `scope` y escribe
+   * dentro. Sin esto volvería el fallo parcial que esto arregla: un usuario sin
+   * credencial, que la base acepta igual porque no hay nada en el esquema que lo
+   * impida.
+   *
+   * Y al revés: si viene `scope`, **no** se abre transacción propia. Anidarlas
+   * no daría una transacción más amplia, solo una que se ignora.
    */
   async execute(
     params: UserNewProps & Pick<ProfileNewProps, 'fullName'>,
+    scope?: PersistenceScope,
   ): Promise<{ user: UserProps; profile: ProfileProps }> {
     // Los dos modelos se construyen **antes** de abrir la transacción, y por
     // eso los dos se validan enteros con sus datos reales: el perfil ya lleva el
@@ -78,23 +91,31 @@ export class CreateUserWithProfileUseCase {
       isPrivate: false,
     });
 
+    const escribir = async (
+      ambito: PersistenceScope,
+    ): Promise<{ user: UserProps; profile: ProfileProps }> => {
+      const user = await this.users.create(userDraft.toPersistence(), ambito);
+
+      return {
+        user,
+        profile: await this.profiles.create(
+          profileDraft.toPersistence(),
+          ambito,
+        ),
+      };
+    };
+
+    if (scope) return escribir(scope);
+
     return this.dataSource.transaction(async (manager) => {
       // Un único scope para las dos escrituras, y no uno por llamada. Además de
       // ser lo correcto, hace que la identidad del objeto sea la prueba: dos
       // objetos distintos con el mismo manager NO garantizan la misma
       // transacción, porque un repositorio podría ignorarlo y usar su propia
       // conexión.
-      const scope: PersistenceScope = { save: manager.save.bind(manager) };
+      const propio: PersistenceScope = { save: manager.save.bind(manager) };
 
-      const user = await this.users.create(userDraft.toPersistence(), scope);
-
-      return {
-        user,
-        profile: await this.profiles.create(
-          profileDraft.toPersistence(),
-          scope,
-        ),
-      };
+      return escribir(propio);
     });
   }
 }

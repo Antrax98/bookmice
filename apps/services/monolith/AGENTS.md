@@ -139,6 +139,47 @@ propio: fecha de nacimiento y muerte, ficha propia.
 | `review` | Calificaciones, reseñas, comentarios, likes | `ratings`, `reviews`, `review_comments`, `review_likes` |
 | `notifications` | Consumidores pasivos de eventos | `notifications` |
 
+### `auth` usa `@nestjs/authentication`, y su fase 2 está pendiente
+
+Trae el guard global, `@Public()`, `@CurrentUser()` y los flujos de sign-in. El
+paquete **no crea usuarios**: pide un usuario por id y decide tu código qué es un
+usuario. Eso deja el alta como un caso de uso nuestro.
+
+Usa **scrypt**, no bcrypt, y `password.logN: 17` son 128 MiB por hash en el
+threadpool de libuv. En desarrollo y test hay que bajarlo; si no, cada test que
+hashee tarda y ocupa.
+
+**La fase 2 no es opcional.** Con `NODE_ENV=production` el módulo **no arranca**
+si un contrato en uso no tiene store, y hay una trampa: *cada login lee el store
+de `mfa`*, aunque no queramos segundo factor. Son seis contratos: `sessions`,
+`refreshTokens`, `mfa`, `magicLinks`, `oidcStates`, `emailTokens`.
+
+Mientras tanto los stores van **en memoria**, que pierde todo al reiniciar y no
+se comparte entre instancias. Para producción hay que escribir el store en
+Postgres con sus migraciones, y el paquete trae sus propios **tests de contrato**
+(`@nestjs/authentication/testing`) que detectan un store que lee y luego escribe
+donde hacía falta una sola sentencia condicional.
+
+Aviso de la doc oficial, que es una trampa real: las duraciones son
+**milisegundos o strings** (`'15m'`), no segundos como en `@nestjs/jwt`. Un valor
+numérico significa otra cosa y solo avisa al arrancar.
+
+### El alta cruza dos módulos, y por eso existe `UserCreationPort`
+
+`credentials` es tabla de `auth`; `users` y `profiles` son de `user`. El alta
+tiene que ser atómica en las tres, así que **quien abre la transacción es
+`auth`**, y `user` escribe dentro mediante `UserCreationPort`.
+
+Sin ese puerto, `auth.RegisterUseCase` llamaría a `CreateUserWithProfileUseCase`
+directamente. Funcionaría, y el lint lo permite, pero rompería el patrón que
+`user` ya usa para hablar con el resto: `UserQueryPort` y `ProfileQueryPort`
+existen justo para eso. Un cuarto puerto del mismo estilo, no una excepción.
+
+Por eso `PersistenceScope` vive en **`src/common/domain/`** y no en el dominio de
+`user`: si viviera en `user`, `auth` importaría el dominio de otro módulo solo
+para pedir un handle de transacción. Compila y pasa el lint, porque las políticas
+de `boundaries` son por **tipo** de capa y no por módulo.
+
 ### `user` y `profile` están en el mismo módulo, pero en tablas distintas
 
 Un módulo, dos entidades: `users` (identidad de acceso) y `profiles` (cara
@@ -485,7 +526,7 @@ npx tsc --noEmit -p tsconfig.json
 `pnpm test` a secas no recoge cobertura y por tanto no falla nunca, aunque el
 `test` pase: si algún día hay CI, tiene que correr `test:cov`, no `test`.
 
-El número que sale es **100 stmts / 94.23 branches / 100 funcs / 100 lines**.
+El número que sale es **100 stmts / 94.44 branches / 100 funcs / 100 lines**.
 
 ### Qué entra en el número
 
@@ -516,8 +557,7 @@ Un fichero que casa con **cualquier** clave de umbral (path o glob) queda
 
 Hay **tres grupos**, y el `global` ya no es el que hace el trabajo:
 
-- `global` → lo que ningún glob reclama: `common/domain` y los puertos de
-  `domain`. Ahora 100 en las cuatro.
+- `global` → lo que ningún glob reclama: `common/domain`. Ahora 100 en las cuatro.
 - `domain/models/**` → **cada modelo por separado**, no la carpeta. Los dos al
   100%.
 - `application/use-cases/**` → **cada caso de uso por separado**. Ahora
@@ -531,7 +571,7 @@ agregado es lo que más se relaja cuando todo lo demás sube.
 
 ### El 75% del caso de uso, y por qué no es un agujero
 
-De 52 ramas hay 49 cubiertas. Las 3 que faltan **no son código del proyecto**.
+De 54 ramas hay 51 cubiertas. Las 3 que faltan **no son código del proyecto**.
 
 Cada fichero con decoradores recibe de TypeScript los helpers `__decorate` y
 `__metadata`, porque `emitDecoratorMetadata` está activo (Nest lo necesita para
@@ -544,7 +584,8 @@ constructor(
   private readonly users: UserRepositoryPort,   // <- unmarked, pero no es suyo
 ```
 
-El caso de uso tiene 12 ramas: 9 reales, todas cubiertas, y 3 de helpers.
+El caso de uso tiene 14 ramas: 11 reales, todas cubiertas, y 3 de helpers.
+Queda en 78.57%.
 
 **Se probaron tres cosas y ninguna funciona:**
 
@@ -555,7 +596,7 @@ El caso de uso tiene 12 ramas: 9 reales, todas cubiertas, y 3 de helpers.
 | `"importHelpers": true` + `tslib` | Las saca del `dist`, pero **ts-jest no lo respeta** y la métrica no se mueve |
 
 Por eso el suelo de `branches` para los casos de uso está en **70**, y no en 95:
-9 de 12 son 75%, y 70 tolera una rama nueva sin romper el build.
+11 de 14 son 78.57%, y 70 tolera una o dos ramas nuevas sin romper el build.
 
 `importHelpers` sí reduce el código emitido en `dist`, así que algún día puede
  tener sentido activarlo. Pero por sí solo **no arregla la cobertura**, y

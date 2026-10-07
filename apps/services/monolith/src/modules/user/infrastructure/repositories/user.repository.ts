@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { PersistenceScope } from '../../domain/interfaces/persistence-scope.interface';
+import { PersistenceScope } from '../../../../common/domain/persistence-scope.interface';
 import {
   UserNewProps,
   UserProps,
