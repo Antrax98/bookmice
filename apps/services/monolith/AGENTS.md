@@ -185,10 +185,8 @@ Si cambias `PASSWORD_LIMITS.maxBytes`, esto hay que actualizarlo:
 - `apps/clients/web/CONTRATO.md`, que avisa de lo mismo desde el otro lado
 - el `openapi.json` commiteado, con `pnpm gen:openapi`
 
-**Y hay un test que lo vigila**, en `password.model.spec.ts`: lee el
-`openapi.json` y compara `maxLength` con `PASSWORD_LIMITS.maxBytes`. Si alguien
-cambia la constante y no regenera el contrato, el test falla solo, diciendo qué
-se rompió. Ese test es el aviso de verdad; este párrafo solo sirve a quien lea.
+Este párrafo es el aviso. No hay test que lo vigila: si alguien cambia la
+constante y no regenera el contrato, el número se queda viejo en silencio.
 
 ### Swagger **no** lo tapa el guard global
 
