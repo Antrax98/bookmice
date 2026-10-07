@@ -83,7 +83,7 @@ const config: Config = {
   // uno a verlo rojo y a pasarlo por alto, y para entonces ya no vigila nada.
   //
   // Estos valores son un **suelo**, no un objetivo: están por debajo de la
-  // cobertura real (100 stmts / 94.44 branches / 100 funcs / 100 lines) y su
+  // cobertura real (100 stmts / 88.68 branches / 100 funcs / 100 lines) y su
   // trabajo es que la cobertura **no baje**.
   //
   // ## Cómo calcula jest los umbrales, que no es lo que parece
@@ -99,9 +99,14 @@ const config: Config = {
   //   100 / 100 / 100 / 100.
   // - el glob de `models` -> cada modelo **por separado**, no el agregado de la
   //   carpeta. Ahora los dos al 100%.
-  // - el glob de `use-cases` -> cada caso de uso por separado. Ahora
-  //   `create-user-with-profile.use-case.ts` en 100 / 78.57 / 100 / 100, y el
-  //   78.57 son las 3 ramas de helpers de TypeScript, no código sin probar.
+  // - el glob de `use-cases` -> cada caso de uso por separado. Ahora:
+  //   `create-user-with-profile.use-case.ts` 100 / 78.57 / 100 / 100,
+  //   `register.use-case.ts` 100 / 77.27 / 100 / 100,
+  //   `login.use-case.ts` 100 / 83.33 / 100 / 100.
+  //
+  //   Los tres tienen statements, functions y lines al 100%. El `branches` está
+  //   entre 77 y 83 por los helpers de TypeScript, una rama por parámetro del
+  //   constructor. Ver el umbral de `use-cases` más abajo.
   //
   // Que el `global` esté al 100% y solo tenga 6 ramas **no** significa que
   // vigile poco: quiere decir que ya no es el que hace el trabajo. El Aggregate
@@ -135,22 +140,35 @@ const config: Config = {
     // demás están al 100%.
     //
     // `branches` está a 70 y no a 95 a propósito, y hay que entender por qué.
-    // **En cualquier fichero con decoradores, TypeScript mete 3 ramas que no
-    // son código nuestro**: los helpers `__decorate` y `__metadata`, que emite
-    // por fichero porque `emitDecoratorMetadata` está activo (Nest lo necesita
-    // para la inyección). El source map los atribuye a las líneas del
-    // constructor, así que parecen tuyas.
     //
-    // Comprobado, no supuesto:
-    // - Quitar los *parameter properties* del constructor **no** las quita.
-    // - `useDefineForClassFields: false` **no** las quita.
-    // - `importHelpers: true` sí las saca del `dist`, pero ts-jest no lo
-    //   respeta, así que la métrica no se mueve. Por eso no está: añadir
-    //   `tslib` como dependencia para no ganar nada sería un peaje.
+    // **Una rama por parámetro del constructor, que no es código nuestro.** En
+    // cualquier clase con `@Injectable()`, TypeScript emite al final del
+    // fichero los helpers `__decorate` y `__metadata`, y ahí están sus ramas.
+    // El `__metadata("design:paramtypes", ...)` es lo que permite a Nest saber
+    // qué inyectar en cada parámetro: sin él no hay inyección de dependencias.
     //
-    // El caso de uso tiene 12 ramas, de las cuales 3 son esos helpers. Con las
-    // 9 reales cubiertas está en 75%, y el suelo queda en 70 para tolerar una
-    // rama nueva sin romper el build.
+    // El source map atribuye esas ramas a las líneas del constructor, así que el
+    // informe señala `private readonly hasher: PasswordHasherPort` como si fuera
+    // tuyo. No lo es.
+    //
+    // Comprobado, aislando las dos partes con el instrumentador:
+    // - `class X { constructor(users, creds) { ... } }` a secas → **0 ramas**.
+    // - `var __decorate = (this && this.__decorate) || function ...` → **sí**.
+    //
+    // Y por eso el total coincide con los parámetros de cada clase:
+    // `register` 5, `login` 4, `create-user-with-profile` 3. **12 en total.**
+    //
+    // Qué se probó y **no** funcionó:
+    // - Quitar los *parameter properties* → no quita las ramas.
+    // - `useDefineForClassFields: false` → no quita las ramas.
+    // - `importHelpers: true` + `tslib` → las saca del `dist`, pero ts-jest no
+    //   lo respeta y la métrica no se mueve.
+    // - Bajar a **jest 29** → tampoco: `@jest/reporters@29.7.0` y `@30.5.2`
+    //   piden las dos `istanbul-lib-instrument@^6.0.0`, y la v5 se comporta
+    //   igual que la v6 con estos helpers. Verificado instrumentando con ambas.
+    //
+    // Es decir: no se puede arreglar sin perder la inyección de dependencias, o
+    // aceptando 88.68% de `branches` global. Se acepta.
     './src/modules/*/application/use-cases/**/*.ts': {
       statements: 95,
       branches: 70,
@@ -159,14 +177,17 @@ const config: Config = {
     },
   },
 
-  // ## El 75% del caso de uso, y por qué no es un agujero
+  // ## El 78% de un caso de uso, y por qué no es un agujero
   //
-  // De 54 ramas hay 51 cubiertas. Las 3 que faltan están en
-  // `create-user-with-profile.use-case.ts`, y son los helpers `__decorate` y
-  // `__metadata` que TypeScript emite por fichero al usar decoradores con
-  // `emitDecoratorMetadata`. No son código del proyecto y ningún test puede
-  // cubrirlas. Está detallado en el umbral de `use-cases` de arriba, con lo que
-  // se probó y lo que no funcionó.
+  // De 106 ramas hay 94 cubiertas. Las **12** que faltan son, todas, los helpers
+  // `__decorate` y `__metadata` que TypeScript emite por fichero en las clases
+  // con `@Injectable()`. Una por parámetro del constructor: 5 en `register`, 4
+  // en `login`, 3 en `create-user-with-profile`.
+  //
+  // Ningún test puede cubrirlas, porque esos helpers tienen un brazo con
+  // `Reflect` y otro legacy, y en runtime solo se ejecuta uno. Está detallado en
+  // el umbral de `use-cases` de arriba, con lo que se probó y lo que no
+  // funcionó, incluida la bajada a jest 29.
   //
   // ## Los dos tests que faltaban de verdad
   //

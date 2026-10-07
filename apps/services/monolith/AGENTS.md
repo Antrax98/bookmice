@@ -600,7 +600,7 @@ npx tsc --noEmit -p tsconfig.json
 `pnpm test` a secas no recoge cobertura y por tanto no falla nunca, aunque el
 `test` pase: si algún día hay CI, tiene que correr `test:cov`, no `test`.
 
-El número que sale es **100 stmts / 94.44 branches / 100 funcs / 100 lines**.
+El número que sale es **100 stmts / 88.68 branches / 100 funcs / 100 lines**.
 
 ### Qué entra en el número
 
@@ -643,94 +643,63 @@ Por fichero y no por carpeta porque un fichero nuevo con cero tests no baja el
 que el peso está en los otros dos grupos, que es donde debe estar, porque el
 agregado es lo que más se relaja cuando todo lo demás sube.
 
-### El 75% del caso de uso, y por qué no es un agujero
+### El `branches` de un caso de uso, y por qué no es un agujero
 
-De 54 ramas hay 51 cubiertas. Las 3 que faltan **no son código del proyecto**.
+De 106 ramas hay 94 cubiertas. Las **12** que faltan **no son código del
+proyecto**: son una rama por cada parámetro del constructor de las clases con
+`@Injectable()`.
 
 Cada fichero con decoradores recibe de TypeScript los helpers `__decorate` y
 `__metadata`, porque `emitDecoratorMetadata` está activo (Nest lo necesita para
-la inyección). Esos helpers traen un `cond-expr` cada uno, y el source map los
-**atribuye a las líneas del constructor**, así que parecen tuyos:
+saber qué inyectar en cada parámetro). Los helpers traen sus propias ramas, y el
+source map las **atribuye a las líneas del constructor**, así que parecen tuyas:
 
 ```ts
-// istanbul señala aquí L46-47, y el código de abajo es inocente
+// istanbul señala aquí L42-45, y el código de abajo es inocente
 constructor(
-  private readonly users: UserRepositoryPort,   // <- unmarked, pero no es suyo
+  private readonly users: UserCreationPort,   // <- no marcada, y tampoco es suya
+  private readonly credentials: CredentialRepositoryPort,
 ```
 
-El caso de uso tiene 14 ramas: 11 reales, todas cubiertas, y 3 de helpers.
-Queda en 78.57%.
+De ahí que el total coincida con los parámetros de cada clase:
 
-**Se probaron tres cosas y ninguna funciona:**
+| Fichero | Parámetros | `branches` |
+|---|---|---|
+| `register.use-case.ts` | 5 | 77.27% |
+| `login.use-case.ts` | 4 | 83.33% |
+| `create-user-with-profile.use-case.ts` | 3 | 78.57% |
 
-| Qué se probó | Resultado |
+Los tres tienen `statements`, `functions` y `lines` al **100%**. Lo único que baja
+es `branches`, y por un motivo que no es tuyo.
+
+**Aislado con el instrumentador**, que es como se comprobó:
+
+```
+class X { constructor(users, creds) { ... } }         -> 0 ramas
+var __decorate = (this && this.__decorate) || function  -> sí genera ramas
+```
+
+**Qué se probó y no funcionó:**
+
+| Qué | Resultado |
 |---|---|
 | Quitar los *parameter properties*, campos explícitos + `this.x = x` | **No quita las ramas** |
 | `"useDefineForClassFields": false` | **No quita las ramas** |
-| `"importHelpers": true` + `tslib` | Las saca del `dist`, pero **ts-jest no lo respeta** y la métrica no se mueve |
+| `"importHelpers": true` + `tslib` | Las saca del `dist`, pero **ts-jest no lo respeta** |
+| **Bajar a jest 29** | **Tampoco**: no es cosa de la versión de jest |
+
+Sobre lo último, que es lo intuitivo: `@jest/reporters@29.7.0` y `@30.5.2` piden
+las dos `istanbul-lib-instrument@^6.0.0`. Instrumentando con la **v5.2.1**, la
+que usaba jest 29 antes, el resultado es idéntico: los helpers siguen generando
+ramas. El problema no está en jest, está en que ese código existe.
 
 Por eso el suelo de `branches` para los casos de uso está en **70**, y no en 95:
-11 de 14 son 78.57%, y 70 tolera una o dos ramas nuevas sin romper el build.
+el 77-83% real mide sobre todo el andamiaje de la inyección de dependencias, y un
+suelo de 95 no lo alcanzaría nadie. No es un agujero que se pueda tapar; es un
+piso que marca lo que sí se controla. Lo que ese grupo vigila de verdad son
+`statements` y `lines`, que están al 100%.
 
 `importHelpers` sí reduce el código emitido en `dist`, así que algún día puede
- tener sentido activarlo. Pero por sí solo **no arregla la cobertura**, y
-añadir `tslib` como dependencia runtime para no ganar nada en la métrica no
-compensa. Por eso no está.
-
-Antes eran 6, y 3 sí eran código muerto: `typeof x === 'string' ? x.trim() : ''`
-sobre un parámetro ya declarado `string`, en `User.normalizeUsername`,
-`User.normalizeEmail` y `Profile.normalizeText`. Eso está quitado.
-
-**Y no hay herramienta que lo impida.** Se comprobó:
-
-- `"allowUnreachableCode": false` en el `tsconfig.json` solo marca sentencias
-  después de un `return` (TS7027), no el brazo muerto de un ternario.
-- `@typescript-eslint/no-unnecessary-condition`, que sí necesita tipos, **tampoco**
-  salta: queda a `error` en el config resuelto y no reporta ni un
-  `x === true` sobre un `boolean`.
-
-La única defensa es la revisión. Por eso el código lleva escrito por qué no
-está el `typeof`, y para eso está la sección de `branches` de este documento.
-
-## Contrato OpenAPI
-
-Hay un `openapi.json` **en la raíz del proyecto**, commiteado, que `web` usa
-para generar su cliente. Se regenera con:
-
-```bash
-pnpm gen:openapi
-```
-
-**Regenera y commitea el fichero cuando cambies una API.** Un contrato
-desactualizado en el repo genera clientes que ya no compilan contra el backend, y
-el error aparece muy lejos de su causa.
-
-### Por qué hay tres ficheros
-
-- **`scripts/generate-openapi.ts`** escribe el JSON. No llama a `listen()`, así
-  que no abre puerto.
-- **`src/openapi-spec.module.ts`** es `AppModule` **sin `DatabaseModule`**. Existe
-  por una razón concreta: `NestFactory.create` **conecta con Postgres aunque no
-  se llame a `listen()`**. Sin este módulo, generar el contrato exigiría una base
-  de datos levantada.
-- **`src/common/swagger/openapi-config.ts`** tiene el `DocumentBuilder`, y lo
-  comparten `main.ts` y el script. Si cada uno tuviera el suyo acabarían
-  desincronizados, y el `openapi.json` commiteado dejaría de describir lo que el
-  backend sirve.
-
-### Si añades un módulo, añádelo a los dos
-
-`OpenApiSpecModule` importa los módulos de negocio a mano, y eso es una
-duplicación con consecuencias: si creas un módulo y lo añades solo a
-`AppModule`, el `openapi.json` se queda viejo **sin que nada avise**. Si un
-endpoint no aparece en el fichero, mira primero si su módulo está en los dos.
-
-### Estado actual
-
-El contrato tiene **0 rutas y 1 esquema**. No hay controladores todavía, y el
-script avisa por consola cuando pasa. Es lo correcto, no un fallo: sirve para
-comprobar que la cadena funciona, y se llenará solo cuando existan endpoints.
-
-Lo mismo sirve en `/api` y `/api-json` mientras la app está en marcha, que es lo
-que hacía el proyecto `portfolio`. Ese proyecto genera los tipos contra el
-backend **andando**, lo que obliga a levantarlo; aquí no hace falta.
+tener sentido activarlo. Pero por sí solo **no arregla la cobertura**, y añadir
+`tslib` como dependencia runtime para no ganar nada en la métrica no compensa.
+Por eso no está.
