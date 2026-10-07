@@ -423,8 +423,62 @@ de imports en cada pasada. No lo declares roto ni lo saltees.
 pnpm build
 pnpm lint
 pnpm test
+pnpm test:cov       # con cobertura y umbrales: esto es lo que falla si baja
 pnpm gen:openapi    # regenera el openapi.json commiteado
 ```
+
+## Cobertura de tests
+
+`pnpm test:cov` es el que **hace cumplir** los umbrales de `jest.config.ts`. Un
+`pnpm test` a secas no recoge cobertura y por tanto no falla nunca, aunque el
+`test` pase: si algún día hay CI, tiene que correr `test:cov`, no `test`.
+
+El número que sale es **98.43 stmts / 86.2 branches / 100 funcs / 98.37 lines**.
+
+### Qué entra en el número
+
+Solo el núcleo: `domain`, `application` y `common/domain`. Fuera:
+
+- **`infrastructure`**, porque hay una regla de ESLint que prohíbe
+  `infrastructure/**/*.spec.ts`. No es una preferencia: un test atado a TypeORM
+  se rompe cuando cambia el adapter. Los repositorios se prueban en e2e contra
+  Postgres, cuando haya e2e.
+- **`src/common/` menos `domain`**: filtros, interceptores y decoradores se
+  prueban atravesando HTTP.
+- **`main.ts`, `*.module.ts`, `migrations/`**: bootstrap y declarativo.
+- **Los ficheros de tipo puro** (`domain/interfaces/`, `application/ports/`): un
+  `interface` no genera código, e istanbul los puntúa a 0% sin que haya nada que
+  probar.
+
+Antes el denominador era `src/**`, y el global daba **23%**. No era que faltaran
+tests: 64 ficheros, 12 de ellos esqueletos vacíos de módulos que aún no existen.
+
+**Los `!` de `collectCoverageFrom` van después de los positivos.** Si una
+negación precede al patrón que reincluye esos ficheros, se pierde en silencio.
+
+### Cómo calcula jest los umbrales
+
+Un fichero que casa con **cualquier** clave de umbral (path o glob) queda
+**fuera** del grupo `global`. O sea que `global` no es "todo lo recogido", es
+"todo lo recogido que ningún glob reclama".
+
+- `global` → el núcleo **sin los modelos**: 100 / 83.33 / 100 / 100.
+- el glob de `domain/models` → **cada modelo por separado**, no la carpeta.
+
+Por modelo y no por carpeta porque un modelo nuevo con cero tests no baja el
+`global` si otros modelos suben la media. Con el glob, sí se detecta.
+
+### Cuánto falta para el 90%
+
+Un test, y solo uno: `branches` está en 86.2.
+
+- `user.model.ts` (125-129): email demasiado largo.
+- `profile.model.ts` (172): campo opcional que llega vacío y debe acabar en
+  `null`.
+
+Las otras dos ramas sin cubrir **no se pueden cubrir** y no son trabajo
+pendiente: un `typeof value === 'string'` sobre un parámetro ya tipado, y los
+parámetros del constructor que istanbul cuenta como rama.
 
 ## Contrato OpenAPI
 
