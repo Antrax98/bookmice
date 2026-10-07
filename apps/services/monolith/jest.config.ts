@@ -67,7 +67,7 @@ const config: Config = {
   // uno a verlo rojo y a pasarlo por alto, y para entonces ya no vigila nada.
   //
   // Estos valores son un **suelo**, no un objetivo: están por debajo de la
-  // cobertura real (100 stmts / 89.66 branches / 100 funcs / 100 lines) y su
+  // cobertura real (100 stmts / 94.23 branches / 100 funcs / 100 lines) y su
   // trabajo es que la cobertura **no baje**.
   //
   // ## Cómo calcula jest los umbrales, que no es lo que parece
@@ -82,8 +82,8 @@ const config: Config = {
   // - `global` -> el resto del núcleo, sin los modelos. Ahora: 100 / 83.33 /
   //   100 / 100.
   // - el glob de `models` -> cada modelo **por separado**, no el agregado de la
-  //   carpeta. Ahora: `user.model.ts` 100 / 88.88 / 100 / 100 y
-  //   `profile.model.ts` 100 / 95.45 / 100 / 100.
+  //   carpeta. Ahora los dos al 100%: `user.model.ts` 100 / 100 / 100 / 100 y
+  //   `profile.model.ts` igual.
   //
   // Por modelo y no por carpeta porque es lo que hace falta: un modelo nuevo
   // con cero tests no baja el `global` si otros suben la media, así que el
@@ -107,37 +107,42 @@ const config: Config = {
     },
   },
 
-  // ## Por qué `branches` se queda en 89.66% y no llega al 90%
+  // ## Por qué `branches` se queda en 94.23% y no llega al 100%
   //
-  // No es que falten tests. De 58 ramas hay 52 cubiertas, y **las 6 que faltan
-  // no se pueden cubrir**:
+  // De 52 ramas hay 49 cubiertas, y **las 3 que faltan no son código nuestro**:
+  // son `user.service.ts` 44-45, los *parameter properties* del constructor
+  // (`private readonly users: UserRepositoryPort`). TypeScript los compila a un
+  // `cond-expr` e istanbul cuenta un brazo que ningún test alcanza.
   //
-  // - **3 son código muerto.** `user.model.ts` 142 y 146, y `profile.model.ts`
-  //   153: `typeof x === 'string' ? x.trim() : ''` sobre un parámetro ya
-  //   declarado `string`. El sistema de tipos garantiza que la condición siempre
-  //   es verdadera, así que el `: ''` no se ejecuta sin un `as any`. Es defensa
-  //   muerta, y está por costumbre.
-  // - **3 son un artefacto de istanbul.** `user.service.ts` 44-46: los
-  //   *parameter properties* del constructor (`private readonly users: ...`).
-  //   TypeScript los compila a un `cond-expr` e istanbul cuenta un brazo que
-  //   ningún test alcanza. La única forma de cubrirlo es dejar de usar
-  //   parameter properties.
+  // Se podrían cubrir renunciando a los parameter properties y escribiendo
+  // `private readonly users: UserRepositoryPort;` más `this.users = users` en el
+  // cuerpo del constructor. **No se ha hecho a propósito**: es degradar el
+  // código para mover una cifra, y lo que mide el número no mejora. Si algún día
+  // se acepta ese coste, se hace a conciencia y aquí se anota por qué.
   //
-  // El techo es 52/58 = 89.66%. Para pasar el 90% hay que **quitar las tres
-  // ramas muertas**, no escribir más tests: sin ellas quedan 52 de 52 y las
-  // cuatro métricas al 100%.
+  // Antes de esto eran 6 las ramas inalcanzables, y 3 de ellas sí eran código
+  // muerto: `typeof x === 'string' ? x.trim() : ''` sobre un parámetro ya
+  // declarado `string`, en `User.normalizeUsername`, `User.normalizeEmail` y
+  // `Profile.normalizeText`. Eso se quitó.
+  //
+  // Y **no hay herramienta que lo impida**: se probó con
+  // `allowUnreachableCode: false` (que solo marca sentencias tras un `return`) y
+  // con `@typescript-eslint/no-unnecessary-condition` con tipos activados (que
+  // tampoco salta). Ver el comentario del `tsconfig.json`. La única defensa es
+  // la revisión, y por eso el código lleva escrito por qué no está el `typeof`.
   //
   // ## Los dos tests que faltaban de verdad
   //
-  // No eran un detalle de Coverage, eran pruebas que no existían:
+  // Antes de quitar nada se añadieron, y no eran un detalle de Coverage, eran
+  // pruebas que no existían:
   //
-  // - `user.model.ts` 124: el `if` de longitud **nunca** se ejecutaba. Todos los
+  // - `user.model.ts`: el `if` de longitud **nunca** se ejecutaba. Todos los
   //   correos probados pasaban o fallaban por `EMAIL_SHAPE`, así que el límite
   //   de 255 no tenía ni un test que lo tocara.
-  // - `profile.model.ts` 172: el brazo que devuelve el texto de `nullable()`
-  //   tenía **cero** ejecuciones. Todos los tests de campos opcionales pasaban
-  //   cadenas vacías, así que un campo opcional con contenido —una bio, que es
-  //   el caso normal— no estaba probado.
+  // - `profile.model.ts`: el brazo de `nullable()` que devuelve el texto tenía
+  //   **cero** ejecuciones. Todos los tests de campos opcionales pasaban cadenas
+  //   vacías, así que un campo opcional con contenido —una bio, que es el caso
+  //   normal— no estaba probado.
 
   // Los umbrales **solo se comprueban si se recoge cobertura**. Un `pnpm test`
   // a secas no recoge cobertura y por tanto no falla nunca, aunque el `test`

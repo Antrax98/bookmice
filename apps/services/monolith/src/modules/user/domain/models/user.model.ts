@@ -138,12 +138,22 @@ export class User {
   // caja, la unicidad tiene que ignorarla también, o 'Antrax' y 'antrax' serían
   // dos usuarios distintos y entrar con cualquiera de los dos sería ambiguo.
   // Normalizando al escribir, el índice único que ya existe basta.
+  //
+  // Aquí **no** hay un `typeof username === 'string'` que devuelva `''` si lo que
+  // llega no es una cadena. Se puso cuando el dato venía de un JSON sin validar
+  // y hacía falta; ahora el parámetro está declarado `string` y el
+  // `DataValidationException` de más abajo es quien se encarga del dato malo.
+  //
+  // La razón para quitarlo no es solo que sobraba: un `''` silencioso acaba en
+  // la tabla `users` como una fila con el identificador vacío, y eso se
+  // descubre después, en la consulta. Con el `typeof` fuera, lo que no es
+  // cadena revienta aquí, en el alta, con el stack de la llamada.
   private static normalizeUsername(username: string): string {
-    return typeof username === 'string' ? username.trim().toLowerCase() : '';
+    return username.trim().toLowerCase();
   }
 
   private static normalizeEmail(email: string): string {
-    return typeof email === 'string' ? email.trim().toLowerCase() : '';
+    return email.trim().toLowerCase();
   }
 
   /**

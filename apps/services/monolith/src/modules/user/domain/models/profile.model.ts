@@ -149,8 +149,11 @@ export class Profile {
     }
   }
 
+  // Sin `typeof value === 'string'` devolviendo `''`: el parámetro ya está
+  // declarado `string` y quien llama (`nullable` y `normalizeEmail`) comprueba
+  // antes el `null`. Ver el mismo comentario en `User.normalizeUsername`.
   private static normalizeText(value: string): string {
-    return typeof value === 'string' ? value.trim() : '';
+    return value.trim();
   }
 
   private static normalizeEmail(value: string | null): string | null {

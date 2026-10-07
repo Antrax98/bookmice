@@ -427,13 +427,26 @@ pnpm test:cov       # con cobertura y umbrales: esto es lo que falla si baja
 pnpm gen:openapi    # regenera el openapi.json commiteado
 ```
 
+**Falta un typecheck de los specs, y no lo pongas.** Ni `build` ni `test`
+comprueban los tipos de `*.spec.ts`:
+
+- `pnpm build` usa `tsconfig.build.json`, que solo incluye `src` sin tests.
+- `pnpm test` va por `ts-jest`, que no para la ejecución por un error de tipos.
+
+Salió de verdad: un test con `errors[0]` sobre un `ApiErrorDetail[] | null`
+pasaba en verde y no compilaba con `tsc`. Para cerrarlo:
+
+```bash
+npx tsc --noEmit -p tsconfig.json
+```
+
 ## Cobertura de tests
 
 `pnpm test:cov` es el que **hace cumplir** los umbrales de `jest.config.ts`. Un
 `pnpm test` a secas no recoge cobertura y por tanto no falla nunca, aunque el
 `test` pase: si algún día hay CI, tiene que correr `test:cov`, no `test`.
 
-El número que sale es **100 stmts / 89.66 branches / 100 funcs / 100 lines**.
+El número que sale es **100 stmts / 94.23 branches / 100 funcs / 100 lines**.
 
 ### Qué entra en el número
 
@@ -464,25 +477,40 @@ Un fichero que casa con **cualquier** clave de umbral (path o glob) queda
 
 - `global` → el núcleo **sin los modelos**: 100 / 83.33 / 100 / 100.
 - el glob de `domain/models` → **cada modelo por separado**, no la carpeta.
-  Ahora `user.model.ts` 100 / 88.88 y `profile.model.ts` 100 / 95.45.
+  Ahora los dos al **100%** en las cuatro métricas.
 
 Por modelo y no por carpeta porque un modelo nuevo con cero tests no baja el
 `global` si otros modelos suben la media. Con el glob, sí se detecta.
 
-### Por qué `branches` no llega al 90%
+### Por qué `branches` se queda en 94.23%
 
-No es que falten tests. De 58 ramas hay 52 cubiertas y las 6 restantes **no se
-pueden cubrir**:
+Las 3 ramas que faltan de 52 **no son código nuestro**: son los *parameter
+properties* del constructor de `UserService` (44-45).
 
-- **3 son código muerto**: `user.model.ts` 142 y 146, y `profile.model.ts` 153,
-  con un `typeof x === 'string' ? x.trim() : ''` sobre un parámetro ya declarado
-  `string`. El sistema de tipos garantiza que la condición es siempre verdadera.
-- **3 son un artefacto de istanbul**: los *parameter properties* del constructor
-  de `UserService` (44-46). TypeScript los compila a un `cond-expr`.
+```ts
+constructor(private readonly users: UserRepositoryPort, ...) {}
+```
 
-El techo es **52/58 = 89.66%**. Para pasar el 90% hay que quitar las tres ramas
-muertas, no escribir más tests: sin ellas quedan 52 de 52 y las cuatro métricas
-al 100%.
+TypeScript compila eso a un `cond-expr` e istanbul cuenta un brazo que ningún
+test alcanza. Se cubrirían renunciando a los parameter properties y escribiendo
+el campo más `this.users = users` en el cuerpo. **No se ha hecho a propósito**:
+degrada el código para mover una cifra. Si algún día se acepta, se hace a
+conciencia.
+
+Antes eran 6, y 3 sí eran código muerto: `typeof x === 'string' ? x.trim() : ''`
+sobre un parámetro ya declarado `string`, en `User.normalizeUsername`,
+`User.normalizeEmail` y `Profile.normalizeText`. Eso está quitado.
+
+**Y no hay herramienta que lo impida.** Se comprobó:
+
+- `"allowUnreachableCode": false` en el `tsconfig.json` solo marca sentencias
+  después de un `return` (TS7027), no el brazo muerto de un ternario.
+- `@typescript-eslint/no-unnecessary-condition`, que sí necesita tipos, **tampoco**
+  salta: queda a `error` en el config resuelto y no reporta ni un
+  `x === true` sobre un `boolean`.
+
+La única defensa es la revisión. Por eso el código lleva escrito por qué no
+está el `typeof`, y para eso está la sección de `branches` de este documento.
 
 ## Contrato OpenAPI
 

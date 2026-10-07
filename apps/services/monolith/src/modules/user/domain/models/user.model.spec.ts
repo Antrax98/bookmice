@@ -143,9 +143,14 @@ describe('User.create', () => {
         // El mensaje va en su propia aserción y no dentro de un
         // `objectContaining`: `expect.stringContaining()` devuelve `any`, y
         // meterlo en un objeto salta el `no-unsafe-assignment` del lint.
+        //
+        // El `!` no es opcional: `AppException.errors` es `ApiErrorDetail[] |
+        // null`, porque una excepción sin errores de campo también es válida. En
+        // este camino concreto nunca es `null` —el colector siempre manda la
+        // lista-, pero hay que decirlo porque si no el `errors[0]` no compila.
         expect(errors).toHaveLength(1);
-        expect(errors[0]).toMatchObject({ field: 'email' });
-        expect(errors[0].message).toContain('255');
+        expect(errors![0]).toMatchObject({ field: 'email' });
+        expect(errors![0].message).toContain('255');
       }
     });
   });

@@ -18,7 +18,31 @@
     "incremental": true,
     "skipLibCheck": true,
     "strict": true,
-    "strictPropertyInitialization": false
+    "strictPropertyInitialization": false,
+    // El código inalcanzable es un **error**, no un aviso. Por defecto
+    // TypeScript solo lo señala como sugerencia y casi nadie lo lee.
+    //
+    // Cubre una cosa concreta: sentencias después de un `return` o un `throw`
+    // (TS7027). En este repo no había ninguna, y la opción se queda porque es
+    // gratis y es la que atrapa ese tipo de resto.
+    //
+    // ## Lo que NO cubre, y se comprobó
+    //
+    // No atrapa el brazo muerto de un ternario. Se probó con
+    // `typeof username === 'string' ? ... : ''` sobre un `username: string` y
+    // `tsc` no dijo nada: para el compilador la condición no es estáticamente
+    // falsa, solo improbable.
+    //
+    // También se probó `@typescript-eslint/no-unnecessary-condition` con la
+    // información de tipos activada (`recommendedTypeChecked` +
+    // `projectService`): la regla queda a `error` en el config resuelto y
+    // **tampoco** salta, ni con `x === true` sobre un `boolean`.
+    //
+    // O sea que para `typeof x === 'string'` sobre un parámetro ya tipado **no
+    // hay herramienta**: la única defensa es la revisión, y por eso el código
+    // lleva escrito por qué no está el `typeof`. No prometas que esto lo
+    // previene.
+    "allowUnreachableCode": false
   },
   // `scripts/` entra en el typecheck del editor pero NO en `tsconfig.build.json`,
 // que solo incluye `src`: un script de desarrollo no tiene que acabar en la
