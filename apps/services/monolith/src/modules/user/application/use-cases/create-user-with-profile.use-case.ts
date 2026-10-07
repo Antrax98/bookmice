@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
 import { PersistenceScope } from '../../../../common/domain/persistence-scope.interface';
+import { TransactionRunnerPort } from '../../../../common/domain/transaction-runner.interface';
 import {
   UserNewProps,
   UserProps,
@@ -45,7 +45,7 @@ export class CreateUserWithProfileUseCase {
   constructor(
     private readonly users: UserRepositoryPort,
     private readonly profiles: ProfileRepositoryPort,
-    private readonly dataSource: DataSource,
+    private readonly transactions: TransactionRunnerPort,
   ) {}
 
   /**
@@ -107,15 +107,9 @@ export class CreateUserWithProfileUseCase {
 
     if (scope) return escribir(scope);
 
-    return this.dataSource.transaction(async (manager) => {
-      // Un único scope para las dos escrituras, y no uno por llamada. Además de
-      // ser lo correcto, hace que la identidad del objeto sea la prueba: dos
-      // objetos distintos con el mismo manager NO garantizan la misma
-      // transacción, porque un repositorio podría ignorarlo y usar su propia
-      // conexión.
-      const propio: PersistenceScope = { save: manager.save.bind(manager) };
-
-      return escribir(propio);
-    });
+    // El mismo puerto que `auth.RegisterUseCase`, y por el mismo motivo: inyectar
+    // `DataSource` aquí haría que `pnpm gen:openapi` fallara, porque
+    // `openapi-spec.module.ts` no tiene `DatabaseModule`.
+    return this.transactions.run(escribir);
   }
 }

@@ -162,7 +162,67 @@ donde hacía falta una sola sentencia condicional.
 
 Aviso de la doc oficial, que es una trampa real: las duraciones son
 **milisegundos o strings** (`'15m'`), no segundos como en `@nestjs/jwt`. Un valor
-numérico significa otra cosa y solo avisa al arrancar.
+numérico significa otra cosa y solo avisa al arrancar. Por eso
+`common/auth/authentication-options.ts` **rechaza un número desnudo** y falla al
+arrancar, en vez de aceptarlo en silencio: un token que caduca en 3.6 segundos
+falla de la forma más difícil de diagnosticar que existe, porque funciona en el
+login y se cae al navegar.
+
+### Swagger **no** lo tapa el guard global
+
+`globalGuard: true` cierra todas las rutas, y `/api` y `/api-json` de Swagger
+parecerían quedar fuera por no ser métodos de un controller. **No es problema**:
+`SwaggerModule.setup` los monta con `httpAdapter.get(...)`, o sea middleware
+directo del adapter HTTP, **fuera** del router de Nest, donde los guards no se
+ejecutan. Comprobado: `GET /api` responde 200 con el guard activo.
+
+No hace falta `@Public()` para Swagger, y no hay forma de ponerlo: no hay handler
+al que decorar.
+
+### Los casos de uso no inyectan `DataSource`: usan `TransactionRunnerPort`
+
+Un caso de uso que necesite una transacción pide `TransactionRunnerPort`, que vive
+en `common/domain`. **No** inyecta `DataSource` de TypeORM.
+
+El motivo es concreto y costó encontrarlo: `openapi-spec.module.ts` existe
+precisamente para **no** abrir conexión con Postgres, pero `NestFactory.create`
+instancia todos los providers aunque no se llame a `listen()`. Un caso de uso con
+`DataSource` no se puede construir sin `DatabaseModule`, así que `pnpm gen:openapi`
+falla con `Nest can't resolve dependencies of the RegisterUseCase (?)`.
+
+`TypeormTransactionRunnerAdapter` es el único sitio del proyecto que abre una
+transacción, y el binding va en **los dos** composition roots (`user` y `auth`),
+porque atarlo en uno solo daría dos adapters con dos conexiones distintas, que es
+justo lo que rompe la atomicidad.
+
+### `openapi-spec.module.ts` usa un `DataSource` que no conecta
+
+Los repositorios piden `@InjectDataSource()`, así que sin un token `DataSource` en
+el módulo de spec, todos fallan al montar. `OpenApiDataSourceModule` lo provee con
+un `DataSource` de TypeORM **sin inicializar**: se construye sin abrir socket y su
+`manager` existe, que es todo lo que Nest necesita. El host es
+`sin-conexion.invalid` a propósito, para que si algo intentara conectar falle en
+lugar de alcanzar una base real.
+
+Es `@Global()` y se importa **una vez**, en `openapi-spec.module.ts`.
+`AppModule` **no** lo importa nunca: allí el token lo pone `DatabaseModule`, y si
+los dos compete, gana el falso y el login falla con
+`No metadata for "CredentialEntity" was found`.
+
+### Los repositorios no usan `@InjectRepository`
+
+Usan `@InjectDataSource()`, que pide solo el token `DataSource`.
+`@InjectRepository` haría que Nest creara un repositorio a partir del
+`TypeOrmModule.forFeature(...)`, que necesita el `DataSource` **del módulo**, y en
+el módulo de spec no lo hay. Los cuatro de `user` ya lo hacían así; `auth` sigue
+el mismo patrón.
+
+### El script de openapi usa `logger: ['error']`, no `logger: false`
+
+Con `false`, Nest silencia el error y su `ExceptionsZone` hace `process.exit(1)`
+**sin imprimir nada**. El comando falla y no dice por qué, y desde fuera no hay
+forma de diagnosticarlo: hay que replicar el grafo de módulos a mano. Pasó de
+verdad, y costó una investigation entera.
 
 ### El alta cruza dos módulos, y por eso existe `UserCreationPort`
 
@@ -506,6 +566,20 @@ pnpm test
 pnpm test:cov       # con cobertura y umbrales: esto es lo que falla si baja
 pnpm gen:openapi    # regenera el openapi.json commiteado
 ```
+
+**`scripts/probar-guard.ts` prueba el guard por HTTP real**, y merece la pena
+cuando se toque auth:
+
+```bash
+npx ts-node -T scripts/probar-guard.ts
+```
+
+Levanta un módulo de prueba con una ruta protegida y comprueba seis casos: token
+válido, sin cabecera, basura, firma manipulada, `alg=none` y usuario inexistente.
+**No lo sustituyas por un `ExecutionContext` a mano**: con un contexto falso,
+`Reflector.get` no encuentra metadata, el guard cree que la ruta es pública y
+acepta **todo**, incluso una petición sin cabecera. Por eso está como script y no
+como test unitario del guard.
 
 **Falta un typecheck de los specs, y no lo pongas.** Ni `build` ni `test`
 comprueban los tipos de `*.spec.ts`:

@@ -1,5 +1,5 @@
-import { DataSource } from 'typeorm';
 import { Test } from '@nestjs/testing';
+import { TransactionRunnerPort } from '../../../../common/domain/transaction-runner.interface';
 import { CreateUserWithProfileUseCase } from './create-user-with-profile.use-case';
 import { UserRepositoryPort } from '../../domain/ports/user-repository.port';
 import { ProfileRepositoryPort } from '../../domain/ports/profile-repository.port';
@@ -15,6 +15,38 @@ import { PersistenceScope } from '../../../../common/domain/persistence-scope.in
  * scope a las dos escrituras, y que el `userId` del perfil sea el id real del
  * usuario), no que TypeORM sepa insertar. Eso último lo prueba la migración.
  */
+
+/**
+ * Adapta un doble escrito como `{ transaction(cb) }` al puerto
+ * `TransactionRunnerPort`, cuya API es `run(op)`.
+ *
+ * Antes el caso de uso tomaba `DataSource` y los dobles se escribían con
+ * `transaction`. Ahora toman el puerto, y los dobles se reescribirían enteros
+ * para cambiar una palabra. Este helper deja el cuerpo de cada test intacto y
+ * hace visible la equivalencia.
+ */
+/**
+ * Adapta un doble escrito como `{ transaction(cb) }` al puerto
+ * `TransactionRunnerPort`, cuya API es `run(op)`.
+ *
+ * Antes el caso de uso tomaba `DataSource` y los dobles se escribían con
+ * `transaction`. Ahora toman el puerto, y reescribir cinco bloques de test para
+ * cambiar una palabra no merece la pena. Este helper deja el cuerpo de cada test
+ * intacto y hace visible la equivalencia.
+ */
+const runner = (
+  transaction: (cb: (scope: unknown) => unknown) => unknown,
+): TransactionRunnerPort => ({
+  // El doble hace `cb({ save })`, es decir, le pasa a la operación un objeto con
+  // `save`. Eso es un `PersistenceScope` de facto, aunque se llame `manager`
+  // por herencia de cuando el caso de uso tomaba `DataSource`. El cast está
+  // porque los tipos no coinciden, no porque haya un `any` escondido: el doble
+  // es local a este fichero.
+  run: <T>(op: (scope: PersistenceScope) => Promise<T>): Promise<T> =>
+    Promise.resolve(
+      transaction(op as unknown as (scope: unknown) => unknown),
+    ) as Promise<T>,
+});
 
 const idFalso = 'f1c8a2de-0000-4000-8000-000000000000';
 
@@ -40,12 +72,12 @@ const scopeAjeno = {
   save: jest.fn(() => Promise.resolve(userFalso)),
 } as unknown as PersistenceScope;
 
-/** Un `DataSource` que no debería tocar nada cuando le pasan un `scope`. */
+/** Un runner que no debería tocar nada cuando le pasan un `scope`. */
 const dataSourceFalso = {
   transaction: () => {
     throw new Error('no debería abrir transacción: ya viene un scope de fuera');
   },
-} as unknown as DataSource;
+} as unknown as TransactionRunnerPort;
 
 describe('CreateUserWithProfileUseCase.execute', () => {
   let guardados: Array<{ tabla: string; props: unknown; scope?: unknown }>;
@@ -88,25 +120,23 @@ describe('CreateUserWithProfileUseCase.execute', () => {
       },
     };
 
-    // Se falsea la transacción: se ejecuta el callback con un `manager` cuyo
-    // `save` devuelve un id fijo. Importa que la transacción **se invoque**,
-    // no lo que haga internamente.
-    const dataSource = {
-      transaction: (cb: (manager: unknown) => unknown) => {
-        const manager = {
-          save: () => Promise.resolve(userFalso),
-          marca: 'scope-de-la-transaccion',
-        };
-        return Promise.resolve(cb(manager));
-      },
-    } as unknown as DataSource;
+    // Se falsea la transacción: se ejecuta la operación con un scope cuyo `save`
+    // devuelve el usuario falso, y que lleva una `marca` para poder comprobar
+    // que es **el mismo objeto** el que llega a las dos escrituras.
+    const dataSource = runner((cb) => {
+      const scope = {
+        save: () => Promise.resolve(userFalso),
+        marca: 'scope-de-la-transaccion',
+      };
+      return Promise.resolve(cb(scope));
+    });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         CreateUserWithProfileUseCase,
         { provide: UserRepositoryPort, useValue: userRepo },
         { provide: ProfileRepositoryPort, useValue: profileRepo },
-        { provide: DataSource, useValue: dataSource },
+        { provide: TransactionRunnerPort, useValue: dataSource },
       ],
     }).compile();
 
@@ -176,19 +206,17 @@ describe('CreateUserWithProfileUseCase.execute', () => {
     // se habría abierto antes de validar el perfil.
     const transaction = jest.fn();
 
-    const dataSource = {
-      transaction: (cb: (m: unknown) => unknown) => {
-        transaction();
-        return Promise.resolve(cb({ save: () => Promise.resolve(userFalso) }));
-      },
-    } as unknown as DataSource;
+    const dataSource = runner((cb) => {
+      transaction();
+      return Promise.resolve(cb({ save: () => Promise.resolve(userFalso) }));
+    });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         CreateUserWithProfileUseCase,
         { provide: UserRepositoryPort, useValue: userRepo },
         { provide: ProfileRepositoryPort, useValue: profileRepo },
-        { provide: DataSource, useValue: dataSource },
+        { provide: TransactionRunnerPort, useValue: dataSource },
       ],
     }).compile();
 
@@ -207,7 +235,7 @@ describe('CreateUserWithProfileUseCase.execute', () => {
    * así que `auth` abre la transacción y este caso de uso escribe dentro.
    */
   describe('con un scope de fuera', () => {
-    /** El mismo `DataSource` del `beforeEach`, pero que delata si se le llama. */
+    /** El mismo runner del `beforeEach`, pero que delata si se le llama. */
     const dataSourceQueSeVigila = () => {
       const transaction = jest.fn();
 
@@ -220,17 +248,17 @@ describe('CreateUserWithProfileUseCase.execute', () => {
               cb({ save: () => Promise.resolve(userFalso) }),
             );
           },
-        } as unknown as DataSource,
+        } as unknown as TransactionRunnerPort,
       };
     };
 
-    const montar = async (dataSource: DataSource) => {
+    const montar = async (dataSource: TransactionRunnerPort) => {
       const moduleRef = await Test.createTestingModule({
         providers: [
           CreateUserWithProfileUseCase,
           { provide: UserRepositoryPort, useValue: userRepo },
           { provide: ProfileRepositoryPort, useValue: profileRepo },
-          { provide: DataSource, useValue: dataSource },
+          { provide: TransactionRunnerPort, useValue: dataSource },
         ],
       }).compile();
 
@@ -329,19 +357,17 @@ describe('CreateUserWithProfileUseCase.execute', () => {
   it('un nombre de usuario inválido falla antes de abrir la transacción', async () => {
     const transaction = jest.fn();
 
-    const dataSource = {
-      transaction: (cb: (m: unknown) => unknown) => {
-        transaction();
-        return Promise.resolve(cb({ save: () => Promise.resolve(userFalso) }));
-      },
-    } as unknown as DataSource;
+    const dataSource = runner((cb) => {
+      transaction();
+      return Promise.resolve(cb({ save: () => Promise.resolve(userFalso) }));
+    });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         CreateUserWithProfileUseCase,
         { provide: UserRepositoryPort, useValue: userRepo },
         { provide: ProfileRepositoryPort, useValue: profileRepo },
-        { provide: DataSource, useValue: dataSource },
+        { provide: TransactionRunnerPort, useValue: dataSource },
       ],
     }).compile();
 

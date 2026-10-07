@@ -1,6 +1,135 @@
 {
   "openapi": "3.1.0",
-  "paths": {},
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "operationId": "RegisterController_registrar",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "data",
+                    "message",
+                    "errors"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 500
+                    },
+                    "data": {
+                      "type": "null",
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Internal server error"
+                    },
+                    "errors": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "$ref": "#/components/schemas/ApiErrorDetailDto"
+                      },
+                      "example": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Register"
+        ]
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "LoginController_iniciarSesion",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "data",
+                    "message",
+                    "errors"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 500
+                    },
+                    "data": {
+                      "type": "null",
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Internal server error"
+                    },
+                    "errors": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "$ref": "#/components/schemas/ApiErrorDetailDto"
+                      },
+                      "example": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Login"
+        ]
+      }
+    }
+  },
   "info": {
     "title": "API",
     "description": "",
@@ -11,6 +140,14 @@
   "servers": [],
   "components": {
     "schemas": {
+      "RegisterDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {}
+      },
       "ApiErrorDetailDto": {
         "type": "object",
         "properties": {

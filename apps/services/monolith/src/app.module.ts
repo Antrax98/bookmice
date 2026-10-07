@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthenticationModule } from '@nestjs/authentication';
 import configuration from './config/configuration';
+import { authenticationOptionsFactory } from './common/auth/authentication-options';
 import { DatabaseModule } from './database/database.module';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -24,6 +26,22 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
       load: [configuration],
       isGlobal: true,
     }),
+    // El guard global de `@nestjs/authentication` se registra aqui y pide un
+    // usuario en TODA ruta que no lleve `@Public()`. Es fail closed a proposito:
+    // una ruta nueva nace protegida y hay que abrirla a proposito.
+    //
+    // El factory esta en `common/auth/authentication-options.ts` y lo comparte
+    // con `openapi-spec.module.ts`. Ver el porque alli: sin esto, generar el
+    // `openapi.json` falla al resolver `AuthenticationRegistry`.
+    AuthenticationModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: authenticationOptionsFactory,
+    }),
+    // `DatabaseModule` va DESPUES de `AuthenticationModule` a propósito, y
+    // `OpenApiDataSourceModule` no se importa aquí nunca: es global, así que si
+    // se importara, su `DataSource` sin conexión competiría con el real y
+    // ganaría la resolución de tokens. Este es el `DataSource` que debe ganar.
+    DatabaseModule,
     DatabaseModule,
     AuthModule,
     UserModule,

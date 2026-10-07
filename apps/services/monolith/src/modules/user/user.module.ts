@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProfileQueryPort } from './application/ports/profile-query.port';
 import { UserQueryPort } from './application/ports/user-query.port';
 import { userProviders } from './composition/container';
+import { CreateUserWithProfileUseCase } from './application/use-cases/create-user-with-profile.use-case';
 import { UserCreationPort } from './domain/ports/user-creation.port';
 import { ProfileEntity } from './infrastructure/entities/profile.entity';
 import { UserEntity } from './infrastructure/entities/user.entity';
@@ -28,6 +29,15 @@ import { UserEntity } from './infrastructure/entities/user.entity';
   imports: [TypeOrmModule.forFeature([UserEntity, ProfileEntity])],
   controllers: [],
   providers: userProviders,
-  exports: [UserQueryPort, ProfileQueryPort, UserCreationPort],
+  // El caso de uso se exporta, y no solo el puerto, porque
+  // `UserCreationAdapter` lo necesita para delegar: sin esto, `AuthModule` no
+  // puede resolver el binding de `UserCreationPort` y Nest falla al arrancar con
+  // `UnknownDependenciesException`.
+  exports: [
+    UserQueryPort,
+    ProfileQueryPort,
+    UserCreationPort,
+    CreateUserWithProfileUseCase,
+  ],
 })
 export class UserModule {}

@@ -1,4 +1,6 @@
 import type { Provider } from '@nestjs/common';
+import { TransactionRunnerPort } from '../../../common/domain/transaction-runner.interface';
+import { TypeormTransactionRunnerAdapter } from '../../../common/database/typeorm-transaction-runner.adapter';
 import { ProfileQueryPort } from '../application/ports/profile-query.port';
 import { UserQueryPort } from '../application/ports/user-query.port';
 import { CreateUserWithProfileUseCase } from '../application/use-cases/create-user-with-profile.use-case';
@@ -29,6 +31,10 @@ import { UserRepositoryAdapter } from '../infrastructure/repositories/user.repos
 
 export const userBindings: Provider[] = [
   { provide: UserCreationPort, useClass: UserCreationAdapter },
+  // Global a propósito: `auth.RegisterUseCase` también lo necesita, y atarlo en
+  // los dos módulos daría dos adapters con dos conexiones distintas, que es
+  // exactamente lo que rompe la transacción que abarca las tres tablas.
+  { provide: TransactionRunnerPort, useClass: TypeormTransactionRunnerAdapter },
   { provide: UserRepositoryPort, useClass: UserRepositoryAdapter },
   { provide: UserQueryPort, useClass: UserQueryAdapter },
   { provide: ProfileRepositoryPort, useClass: ProfileRepositoryAdapter },

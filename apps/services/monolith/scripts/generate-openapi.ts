@@ -27,7 +27,21 @@ import { buildOpenApiConfig } from '../src/common/swagger/openapi-config';
 const OUTPUT = 'openapi.json';
 
 async function main(): Promise<void> {
-  const app = await NestFactory.create(OpenApiSpecModule, { logger: false });
+  /**
+   * `logger: ['error']` y **no** `logger: false`.
+   *
+   * Con `false`, Nest silencia el error y su `ExceptionsZone` hace
+   * `process.exit(1)` sin imprimir nada. El script parece fallar sin decir por
+   * qué, y desde fuera no hay forma de diagnosticarlo: hay que replicar el grafo
+   * de módulos a mano para poder ver el mensaje. Pasó de verdad con
+   * `DataSource` sin resolver.
+   *
+   * Con `['error']` sale por stderr solo cuando hay un error de verdad, que es lo
+   * que interesa. El resto del log de arranque sigue fuera.
+   */
+  const app = await NestFactory.create(OpenApiSpecModule, {
+    logger: ['error'],
+  });
 
   const document = applyDefaultErrorResponses(
     SwaggerModule.createDocument(app, buildOpenApiConfig(), {
@@ -54,4 +68,14 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+/**
+ * Sin este `catch`, un fallo de `main()` sale como un rechazo sin manejar y
+ * ts-node **termina con exit 1 sin imprimir nada**: el script parece fallar sin
+ * decir por qué. Pasa de verdad, y costó una investigation entera.
+ */
+void main().catch((error: unknown) => {
+  const mensaje = error instanceof Error ? error.message : String(error);
+  console.error(`No se pudo generar ${OUTPUT}: ${mensaje}`);
+  if (error instanceof Error && error.stack) console.error(error.stack);
+  process.exit(1);
+});
