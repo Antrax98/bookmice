@@ -1,21 +1,27 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ProfileQueryPort } from './application/ports/profile-query.port';
+import { UserQueryPort } from './application/ports/user-query.port';
 import { userProviders } from './composition/container';
+import { ProfileEntity } from './infrastructure/entities/profile.entity';
+import { UserEntity } from './infrastructure/entities/user.entity';
 
 /**
  * Superficie Nest del módulo `user`.
  *
- * Solo lo que Nest necesita saber: qué controladores expone, qué módulos
- * necesita importados y qué providers tiene. El wiring puerto→adapter vive en
- * `composition/container.ts`; los casos de uso, en `application/`.
+ * Un módulo, dos entidades. `users` es identidad de acceso y `profiles` cara
+ * pública, y son tablas distintas porque lo que se expone a terceros no debe
+ * incluir el correo del login. Esa separación es de **datos**, no de módulos:
+ * por eso los dos puertos de lectura se exportan por separado.
  *
- * Añade aquí lo que corresponda cuando exista: `TypeOrmModule.forFeature([...])`
- * en `imports`, `controllers: [...]`, y `exports` solo si otro módulo
- * necesita algo de este.
+ * `ProfileQueryPort` lo necesitará `review` (el nombre y el avatar de quien
+ * escribe una reseña) y `UserQueryPort` lo necesitará `auth` (el login busca
+ * por email o username). Siempre por el puerto, nunca importando el modelo.
  */
 @Module({
-  imports: [],
+  imports: [TypeOrmModule.forFeature([UserEntity, ProfileEntity])],
   controllers: [],
   providers: userProviders,
-  exports: [],
+  exports: [UserQueryPort, ProfileQueryPort],
 })
 export class UserModule {}

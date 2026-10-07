@@ -94,24 +94,76 @@ propio: fecha de nacimiento y muerte, ficha propia.
 | Módulo | Qué hace | Tablas |
 |---|---|---|
 | `auth` | Login, contraseñas, tokens, guards | `credentials` |
-| `user` | Identidad: username, email | `users` |
-| `profile` | Cara pública: nombre, bio, avatar, ubicación | `profiles` |
+| `user` | Identidad y cara pública: login y perfil | `users`, `profiles` |
 | `catalog` | Obras y ediciones, promedio asíncrono | `works`, `editions` |
 | `author` | Ficha de autor y su relación con las obras | `authors`, `author_works` |
 | `shelf` | Estados de lectura y listas | `shelves`, `shelf_entries` |
 | `review` | Calificaciones, reseñas, comentarios, likes | `ratings`, `reviews`, `review_comments`, `review_likes` |
 | `notifications` | Consumidores pasivos de eventos | `notifications` |
 
-### `user` y `profile` están separados a propósito
+### `user` y `profile` están en el mismo módulo, pero en tablas distintas
 
-No por tamaño: por ritmo de cambio. `user` guarda lo que lee el login y casi no
-cambia. `profile` guarda lo que cambia cada semana y se muestra a terceros.
-Juntos, cada edición de la bio toca la fila que el login lee, y tarde o temprano
-aparece un endpoint de perfil devolviendo datos de acceso.
+Un módulo, dos entidades: `users` (identidad de acceso) y `profiles` (cara
+pública). La separación que importa es de **datos**, no de módulos.
+
+Estaban en módulos separados con el argumento del "ritmo de cambio", y era
+falso: al ser tablas distintas, editar la bio nunca tocó la fila que lee el
+login. Lo que de verdad se protege es que un endpoint de perfil no devuelva
+`users.email`, y eso lo da **la tabla que se consulta**, no el módulo que la
+contiene.
+
+Por eso los puertos de lectura son **dos** (`UserQueryPort` y
+`ProfileQueryPort`) aunque vivan juntos: quien pide perfil llama a
+`ProfileQueryPort` y no tiene forma de alcanzar `users`. Un puerto único
+invitaría a devolver el email en el mismo objeto que el nombre.
+
+Y como un usuario sin perfil no es un estado válido, estar en el mismo módulo
+es lo que hace cumplir esa invariante en vez de dejarla en una convención:
+`createUserWithProfile` los escribe **en una transacción**, así que un
+`fullName` inválido no deja un usuario huérfano. Sin la transacción, la base lo
+aceptaba sin quejarse.
+
+### Los UUID los genera la aplicación, no la base
+
+`User.createNew` y `Profile.createNew` llaman a `randomUUID()` de `node:crypto`.
+Las columnas `id` son `@PrimaryColumn('uuid')` y **no** llevan
+`DEFAULT gen_random_uuid()`. Insertar sin id falla con `null value in column
+"id"`, que es justo lo que se quiere: si el id existe en algún sitio, que sea
+el nuestro y no el de un default que nadie recuerda.
+
+Node usa el CSPRNG del sistema, así que es un v4 criptográfico, lo mismo que
+`gen_random_uuid()`. No es una decisión estética.
+
+**Lo que se gana** es que el id existe **antes** del INSERT. Por eso
+`createUserWithProfile` puede construir el perfil entero con su `userId` real y
+validarlo antes de abrir la transacción. Con el default, el `userId` solo se
+conocía después del primer INSERT, y había que validar el perfil con un
+`userId: ''` para corregirlo después.
+
+La asimetría que sale de eso, y que conviene no romper:
+
+- `UserNewProps` **no** tiene `id`: quien crea el usuario no lo elige.
+- `toPersistence()` **sí** lo lleva, porque va en el INSERT. Por eso los puertos
+  de escritura reciben `UserWithId`, no `UserNewProps`.
+- Las fechas **no** van en `toPersistence()`: las pone la columna con
+  `DEFAULT now()`. Lo que decide la aplicación se escribe; lo que decide la
+  base se deja.
+
+**No hay que tocar `pgcrypto` ni `uuid-ossp`.** No se usa ninguna de las dos.
+TypeORM tiene una opción `uuidExtension` que solo aplica cuando las entidades
+usan `@PrimaryGeneratedColumn('uuid')`, así que aquí no está. Ojo con su `down`
+por defecto: pone `uuid_generate_v4()`, que es de la extensión antigua.
 
 El *libro favorito* **no va en `profile`**. Es una relación con un libro, no un
 atributo del usuario: es lo mismo que una shelf. Si estuviera ahí, `profile`
 dependería de `catalog` para poder pintarse.
+
+**No hay foreign key** entre `profiles.user_id` y `users.id`, aunque estén en el
+mismo módulo. El coste está medido: al borrar un usuario sin pasar por el caso de
+uso, su perfil queda huérfano y nada avisa. A favor, declarar la relación ata la
+integridad a que la entidad la declare, y un esquema que no para de drift es
+peor que uno sin integridad. Lo que sí está es `UNIQUE (user_id)`, que es la
+regla que importaba.
 
 ### Comentarios y likes cuelgan de la reseña
 

@@ -3,7 +3,6 @@ import { ConfigModule } from '@nestjs/config';
 import configuration from './config/configuration';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
-import { ProfileModule } from './modules/profile/profile.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { AuthorModule } from './modules/author/author.module';
 import { ShelfModule } from './modules/shelf/shelf.module';
@@ -35,7 +34,6 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     }),
     AuthModule,
     UserModule,
-    ProfileModule,
     CatalogModule,
     AuthorModule,
     ShelfModule,
