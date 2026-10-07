@@ -7,6 +7,7 @@ import { TransactionRunnerPort } from '../../../../common/domain/transaction-run
 import { UserQueryPort } from '../../../user/application/ports/user-query.port';
 import { UserCreationPort } from '../../../user/domain/ports/user-creation.port';
 import { CredentialProps } from '../../domain/interfaces/credential.interface';
+import { UserProps } from '../../../user/domain/interfaces/user.interface';
 import { CredentialRepositoryPort } from '../../domain/ports/credential-repository.port';
 import { CredentialQueryPort } from '../ports/credential-query.port';
 import { PasswordHasherPort } from '../ports/password-hasher.port';
@@ -209,11 +210,21 @@ describe('RegisterUseCase', () => {
 });
 
 describe('LoginUseCase', () => {
-  const montar = async (credencial: CredentialProps | null) => {
+  /**
+   * `credencial` y `usuario` van **por separado**, y no uno derivado del otro.
+   *
+   * Antes el doble de `findOneUser` devolvía el usuario solo si había credencial,
+   * lo que hacía imposible probar dos cosas que son justo las interesantes: una
+   * cuenta **desactivada** y una credencial cuya usuario **ya no existe**.
+   *
+   * Con los dos parámetros, cada estado del sistema se puede montar de verdad.
+   */
+  const montar = async (
+    credencial: CredentialProps | null,
+    usuario: UserProps | null = credencial ? userFalso : null,
+  ) => {
     const findByEmail = jest.fn(() => Promise.resolve(credencial));
-    const findOneUser = jest.fn(() =>
-      Promise.resolve(credencial ? userFalso : null),
-    );
+    const findOneUser = jest.fn(() => Promise.resolve(usuario));
     const verify = jest.fn(
       (password: string, encoded: string | null | undefined) =>
         encoded
@@ -296,15 +307,95 @@ describe('LoginUseCase', () => {
     expect(verify).toHaveBeenCalledWith('otra-contrasena', undefined);
   });
 
-  it('rechaza una cuenta desactivada, con el mismo mensaje', async () => {
-    const { login } = await montar(credencialFalsa());
+  /**
+   * Una cuenta desactivada con la contraseña correcta **no** entra, y con el
+   * mismo mensaje que una contraseña mala.
+   *
+   * El mensaje importa: si dijera "tu cuenta está desactivada", confirmaría al
+   * atacante que el correo existe y que la contraseña es correcta. Solo quien ya
+   * está autenticado debe saber por qué no puede entrar.
+   */
+  it('rechaza una cuenta desactivada, con el mismo mensaje que una contraseña mala', async () => {
+    const { login } = await montar(credencialFalsa(), {
+      ...userFalso,
+      isActive: false,
+    });
 
-    // El doble de `findOneUser` devuelve `null` cuando no hay credencial, así que
-    // para este caso hace falta el caso de uso montado con credencial pero sin
-    // usuario. Se comprueba con el mismo mensaje de siempre.
     await expect(
       login.execute({ email: 'test@correo.com', password: ALTO }),
-    ).resolves.toMatchObject({ accessToken: 'access.falso' });
+    ).rejects.toThrow(UnauthenticatedException);
+  });
+
+  /**
+   * La credencial existe pero su usuario **ya no**. Pasa si alguien borró el
+   * usuario por fuera del caso de uso, que es justo lo que puede pasar porque no
+   * hay foreign key entre `credentials` y `users` (ver la entidad).
+   */
+  it('rechaza una credencial cuyo usuario ya no existe', async () => {
+    const { login } = await montar(credencialFalsa(), null);
+
+    await expect(
+      login.execute({ email: 'test@correo.com', password: ALTO }),
+    ).rejects.toThrow(UnauthenticatedException);
+  });
+
+  /**
+   * El orden importa: la cuenta desactivada se comprueba **después** de
+   * verificar la contraseña, para que responder más rápido no revele qué correos
+   * tienen la cuenta desactivada.
+   *
+   * Se comprueba el orden real de las llamadas, no que ambas ocurran.
+   */
+  it('verifica la contraseña ANTES de mirar si la cuenta está activa', async () => {
+    const orden: string[] = [];
+
+    const credencial = credencialFalsa();
+    const findByEmail = jest.fn(() => Promise.resolve(credencial));
+    const verify = jest.fn(() => {
+      orden.push('verify');
+      return Promise.resolve(true);
+    });
+    const findOneUser = jest.fn(() => {
+      orden.push('findOneUser');
+      return Promise.resolve({ ...userFalso, isActive: false });
+    });
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        LoginUseCase,
+        { provide: CredentialQueryPort, useValue: { findByEmail } },
+        { provide: UserQueryPort, useValue: { findOneUser } },
+        {
+          provide: PasswordHasherPort,
+          useValue: { hash: jest.fn(), verify, needsRehash: jest.fn() },
+        },
+        {
+          provide: TokenService,
+          useValue: { issue: jest.fn() },
+        },
+      ],
+    }).compile();
+
+    await expect(
+      moduleRef
+        .get(LoginUseCase)
+        .execute({ email: 'test@correo.com', password: ALTO }),
+    ).rejects.toThrow(UnauthenticatedException);
+
+    expect(orden).toEqual(['verify', 'findOneUser']);
+  });
+
+  it('no emite token para una cuenta desactivada', async () => {
+    const { login, issue } = await montar(credencialFalsa(), {
+      ...userFalso,
+      isActive: false,
+    });
+
+    await expect(
+      login.execute({ email: 'test@correo.com', password: ALTO }),
+    ).rejects.toThrow(UnauthenticatedException);
+
+    expect(issue).not.toHaveBeenCalled();
   });
 
   /**
