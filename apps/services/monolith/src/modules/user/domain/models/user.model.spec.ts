@@ -85,6 +85,21 @@ describe('User.create', () => {
 
       expect(user.toProps().username).toHaveLength(50);
     });
+
+    // El correo tiene su propio límite (255) y su propia forma, así que el
+    // límite se comprueba con un correo **válido** de ese tamaño. Con una
+    // cadena de 255 caracteres cualquiera el test pasaría por el `EMAIL_SHAPE` y
+    // no por el `length`, que es justo lo que se quiere comprobar.
+    it('un correo de exactamente 255 caracteres', () => {
+      // 244 + los 11 de `@correo.com`. El número va escrito a mano a propósito:
+      // si se calculara con un `255 - '@correo.com'.length` el test seguiría
+      // pasando, y justo de eso se trata, de comprobar el 255 de verdad.
+      const user = User.create(
+        props({ email: `${'a'.repeat(244)}@correo.com` }),
+      );
+
+      expect(user.toProps().email).toHaveLength(255);
+    });
   });
 
   describe('rechaza el correo', () => {
@@ -98,6 +113,40 @@ describe('User.create', () => {
       expect(() => User.create(props({ email: '   ' }))).toThrow(
         DataValidationException,
       );
+    });
+
+    // Este caso no estaba, y sin él la rama del `length` máximo no se ejecutaba
+    // nunca: todos los correos que probábamos o pasaban o fallaban por
+    // `EMAIL_SHAPE`, así que el límite de 255 no tenía ni un test que lo
+    // tocara. El orden de los `if` importa aquí: como el de longitud va antes
+    // del de forma, un correo larguísimo da este error y no "no es una
+    // dirección válida".
+    it('uno de más de 255 caracteres', () => {
+      expect(() =>
+        User.create(props({ email: `${'a'.repeat(250)}@correo.com` })),
+      ).toThrow(DataValidationException);
+    });
+
+    // El detalle que hace que el anterior no baste: este correo tiene 261
+    // caracteres y una forma **válida**, así que si el límite no estuviera no
+    // fallaría. Y por qué importa el mensaje: los `if` van en orden, así que un
+    // correo larguísimo tiene que quejarse de la longitud y no de la forma. Si
+    // alguien invirtiera el orden de los dos, este test lo canta y el anterior
+    // no.
+    it('se queja de la longitud, no de que no sea una dirección válida', () => {
+      try {
+        User.create(props({ email: `${'a'.repeat(250)}@correo.com` }));
+        fail('deberia haber lanzado');
+      } catch (error) {
+        const { errors } = error as DataValidationException;
+
+        // El mensaje va en su propia aserción y no dentro de un
+        // `objectContaining`: `expect.stringContaining()` devuelve `any`, y
+        // meterlo en un objeto salta el `no-unsafe-assignment` del lint.
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toMatchObject({ field: 'email' });
+        expect(errors[0].message).toContain('255');
+      }
     });
   });
 

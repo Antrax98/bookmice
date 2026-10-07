@@ -433,7 +433,7 @@ pnpm gen:openapi    # regenera el openapi.json commiteado
 `pnpm test` a secas no recoge cobertura y por tanto no falla nunca, aunque el
 `test` pase: si algún día hay CI, tiene que correr `test:cov`, no `test`.
 
-El número que sale es **98.43 stmts / 86.2 branches / 100 funcs / 98.37 lines**.
+El número que sale es **100 stmts / 89.66 branches / 100 funcs / 100 lines**.
 
 ### Qué entra en el número
 
@@ -464,21 +464,25 @@ Un fichero que casa con **cualquier** clave de umbral (path o glob) queda
 
 - `global` → el núcleo **sin los modelos**: 100 / 83.33 / 100 / 100.
 - el glob de `domain/models` → **cada modelo por separado**, no la carpeta.
+  Ahora `user.model.ts` 100 / 88.88 y `profile.model.ts` 100 / 95.45.
 
 Por modelo y no por carpeta porque un modelo nuevo con cero tests no baja el
 `global` si otros modelos suben la media. Con el glob, sí se detecta.
 
-### Cuánto falta para el 90%
+### Por qué `branches` no llega al 90%
 
-Un test, y solo uno: `branches` está en 86.2.
+No es que falten tests. De 58 ramas hay 52 cubiertas y las 6 restantes **no se
+pueden cubrir**:
 
-- `user.model.ts` (125-129): email demasiado largo.
-- `profile.model.ts` (172): campo opcional que llega vacío y debe acabar en
-  `null`.
+- **3 son código muerto**: `user.model.ts` 142 y 146, y `profile.model.ts` 153,
+  con un `typeof x === 'string' ? x.trim() : ''` sobre un parámetro ya declarado
+  `string`. El sistema de tipos garantiza que la condición es siempre verdadera.
+- **3 son un artefacto de istanbul**: los *parameter properties* del constructor
+  de `UserService` (44-46). TypeScript los compila a un `cond-expr`.
 
-Las otras dos ramas sin cubrir **no se pueden cubrir** y no son trabajo
-pendiente: un `typeof value === 'string'` sobre un parámetro ya tipado, y los
-parámetros del constructor que istanbul cuenta como rama.
+El techo es **52/58 = 89.66%**. Para pasar el 90% hay que quitar las tres ramas
+muertas, no escribir más tests: sin ellas quedan 52 de 52 y las cuatro métricas
+al 100%.
 
 ## Contrato OpenAPI
 

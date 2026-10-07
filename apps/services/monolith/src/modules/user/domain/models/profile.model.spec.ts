@@ -82,6 +82,45 @@ describe('Profile.create', () => {
     });
   });
 
+  /**
+   * El contrapunto del bloque anterior, y faltaba entero.
+   *
+   * Todos los tests de campos opcionales pasaban cadenas **vacías**, así que el
+   * brazo de `nullable()` que devuelve el texto nunca se ejecutaba: el modelo
+   * solo estaba probado en su camino a `null`. Un campo opcional que sí tiene
+   * contenido es el caso normal de una bio, y es el que ninguém había escrito.
+   *
+   * `headline` va aparte porque es el único que los tests de "vacío" no tocaban:
+   * los otros tres (bio, location, avatarUrl) ya pasaban por `nullable()`.
+   */
+  describe('los campos opcionales conservan su texto', () => {
+    it('una bio con contenido', () => {
+      const profile = Profile.create(props({ bio: 'Leen de todo.' }));
+
+      expect(profile.toProps().bio).toBe('Leen de todo.');
+    });
+
+    it('y le quita los espacios de alrededor, igual que el nombre', () => {
+      const profile = Profile.create(props({ bio: '  Leen de todo.  ' }));
+
+      expect(profile.toProps().bio).toBe('Leen de todo.');
+    });
+
+    it('un headline con contenido', () => {
+      const profile = Profile.create(
+        props({ headline: 'Lector de ciencia ficción' }),
+      );
+
+      expect(profile.toProps().headline).toBe('Lector de ciencia ficción');
+    });
+
+    it('una location con contenido', () => {
+      const profile = Profile.create(props({ location: 'Vigo' }));
+
+      expect(profile.toProps().location).toBe('Vigo');
+    });
+  });
+
   describe('rechaza el nombre', () => {
     it('uno vacío', () => {
       expect(() => Profile.create(props({ fullName: '   ' }))).toThrow(
