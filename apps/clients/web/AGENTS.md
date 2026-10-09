@@ -22,35 +22,39 @@ Frontend del clon de Goodreads. Next.js 16 con App Router.
 
 ## Estado actual
 
-Esto es un `create-next-app` recién generado. Lo que existe:
-
 ```
-src/app/         la App Router: layout, page, estilos
+src/app/            la App Router: layout, theme, portada, login y register
+src/app/api/proxy/  el BFF: proxy y logout
+src/lib/api/        los dos transportes, el sobre y los tipos del contrato
+src/proxy.ts        quién ve el login y quién no
 ```
 
-Lo que **no** existe todavía, y hay que crear: `lib/api/`, los tipos
-generados del contrato, el proxy del BFF y el middleware de sesión. Ver
-<<bff-y-cliente>> para cómo se montan.
+Funciona de punta a punta: registro, login, cookie de sesión y logout. La
+portada es un texto de bienvenida; no hay catálogo todavía.
 
 ## Habla con el backend por el contrato, no importando código
 
 Este proyecto **no importa nada** del monolith. Se comunica con la API por su
 contrato OpenAPI.
 
-El flujo previsto:
+El contrato se genera **en vivo**, contra el backend levantado:
 
 ```
-monolith genera openapi.json → se commitea en el repo
-                           → este proyecto genera sus tipos desde el fichero
+backend andando  ->  GET localhost:8080/api-json  ->  src/lib/api/generated.ts
 ```
 
-Que el fichero esté commiteado es lo que hace que aquí **no necesites el backend
-andando** para regenerar los tipos. Es mejor que ir contra el backend en vivo,
-que es como funciona el proyecto `portfolio` y obliga a levantarlo primero.
+```bash
+pnpm gen:live
+```
 
-El script para generarlos todavía **no existe** en este proyecto. Cuando se
-escriba, el orden es: `openapi-typescript openapi.json -o lib/api/generated.ts`,
-y después `lib/api/schemas.ts` es la única puerta a esos tipos.
+**Hay que levantar el backend primero.** No hay `openapi.json` commiteado, y es
+deliberado: el que se generaba con `ts-node` salía con los DTO vacíos, porque
+`@nestjs/swagger/plugin` es un transformador de compilador y `ts-node` no lo
+aplica. Un contrato commiteado que miente es peor que ninguno. La comparación
+está en el `AGENTS.md` de la raíz.
+
+`src/lib/api/schemas.ts` es la única puerta a esos tipos: nada importa
+`generated.ts` directamente.
 
 ## BFF y cliente
 
@@ -126,7 +130,12 @@ genera desde un fichero y no contra el backend en vivo.
 pnpm dev
 pnpm build
 pnpm lint
+pnpm gen:live      # tipos del contrato; requiere el backend andando
 ```
+
+**No hay tests.** Ni runner ni `*.spec.*`. Lo único que falla el build es el
+typecheck y el lint, y eso no comprueba comportamiento. Para el flujo de auth se
+verifica a mano contra el backend real.
 
 ### El linter no usa `eslint-config-next`
 
@@ -167,5 +176,12 @@ exista. Validarlo obligaría a llamar al backend en cada carga de una página
 pública, y lo único que decide es qué botones pintar. Si el token está muerto,
 el enlace al panel lleva al login, que es lo mismo que pasa aquí.
 
-**`src/app/page.module.css`** viene del `create-next-app`. No lo borres sin
-mirar si `page.tsx` lo importa.
+**No hay CSS propio.** `globals.css` y `page.module.css` del `create-next-app`
+se borraron: con `CssBaseline` de MUI, que está montado en `ThemeRegistry`, los
+dos estorbaban. Si añades estilos, van en el `sx` de MUI o en un módulo nuevo,
+no en un reset global.
+
+**`src/proxy.ts` es el `middleware.ts` renombrado**, no otra cosa. En Next 16
+`middleware` pasó a llamarse `proxy`. Solo va en el `matcher` de `/login` y
+`/register`, para que quien ya tiene cookie no los vea. La portada `/` es
+pública a propósito: muestra el botón de entrar cuando no hay sesión.

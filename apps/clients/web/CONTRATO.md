@@ -6,8 +6,7 @@ nadie lo regenera.
 
 ## `maxLength` del openapi son bytes en el servidor, no caracteres
 
-El `openapi.json` commiteado en el monolith dice, para la contraseña del
-registro:
+El contrato que sirve el monolith dice, para la contraseña del registro:
 
 ```json
 "password": { "type": "string", "minLength": 12, "maxLength": 72 }
@@ -35,12 +34,12 @@ emoji puede pasar la validación del cliente y recibir un **400** del servidor.
 
 ### Si el número cambia
 
-El monolith tiene un **test** que lee el `openapi.json` y lo compara con
-`PASSWORD_LIMITS.maxBytes`. Si alguien sube el límite y no regenera el contrato,
-el test falla solo. Así que el número no puede callarse.
+El contrato se genera en vivo del backend, así que el número se mueve solo en
+cuanto se levante: no hay nada que regenerar a mano. Lo único que puede quedarse
+viejo es **este texto**.
 
 Lo que sí puede pasar es que alguien cambie `maxLength` a propósito en el
-contrato. Si lo hace, **este párrafo miente**, y hay que actualizarlo. Por eso
+monolith. Si lo hace, **este párrafo miente**, y hay que actualizarlo. Por eso
 el número aparece aquí escrito y no solo referenciado: para que se vea raro
 cuando deje de cuadrar.
 
