@@ -1,10 +1,12 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, HttpStatus, Post } from '@nestjs/common';
 import { Public } from '@nestjs/authentication';
-import { RegisterDto } from './auth.dto';
+import { RegisterDto, RegisterResultDto } from './auth.dto';
 import {
   RegisterUseCase,
   type RegisterResult,
 } from '../../application/use-cases/register.use-case';
+import { ApiTags } from '@nestjs/swagger';
+import { ApiEnvelope } from '../../../../common/decorators/api-envelope.decorator';
 
 /**
  * El alta de cuenta.
@@ -27,6 +29,7 @@ import {
  * abrirla es una decisión explícita. Estas dos son las únicas excepciones, porque
  * son precisamente las rutas **anteriores** a tener un token.
  */
+@ApiTags('auth')
 @Public()
 @Controller('auth/register')
 export class RegisterController {
@@ -41,6 +44,7 @@ export class RegisterController {
    * de correo sin querer. Quien se registra, después entra por `login`.
    */
   @Post()
+  @ApiEnvelope(RegisterResultDto, { status: HttpStatus.CREATED })
   async registrar(@Body() body: RegisterDto): Promise<RegisterResult> {
     return this.register.execute({
       username: body.username,

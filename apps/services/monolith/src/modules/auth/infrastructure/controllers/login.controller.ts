@@ -1,10 +1,15 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import { Public } from '@nestjs/authentication';
-import { LoginDto } from './auth.dto';
+import { LoginDto, LoginResultDto } from './auth.dto';
 import {
   LoginUseCase,
   type LoginResult,
 } from '../../application/use-cases/login.use-case';
+import { ApiTags } from '@nestjs/swagger';
+import {
+  ApiEnvelope,
+  ApiEnvelopeError,
+} from '../../../../common/decorators/api-envelope.decorator';
 
 /**
  * El login con correo y contraseña.
@@ -18,6 +23,7 @@ import {
  * excepción al default del guard global, y lleva `@Public()` explícito por eso,
  * no por descuido.
  */
+@ApiTags('auth')
 @Public()
 @Controller('auth/login')
 export class LoginController {
@@ -35,6 +41,12 @@ export class LoginController {
    */
   @Post()
   @HttpCode(200)
+  // Sin `status`: el decorador usa `HttpStatus.OK`, que es lo que responde este
+  // metodo. Pasarle `CREATED` hacia que el contrato anuncie un 201 que no existe.
+  @ApiEnvelope(LoginResultDto)
+  // El 401 ocurre de verdad, y es la respuesta mas frecuente de esta ruta. Sin
+  // esto el contrato solo anuncia el camino feliz.
+  @ApiEnvelopeError(401, 'Credenciales invalidas')
   async iniciarSesion(@Body() body: LoginDto): Promise<LoginResult> {
     return this.login.execute({
       email: body.email,

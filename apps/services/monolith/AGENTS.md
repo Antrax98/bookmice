@@ -172,7 +172,7 @@ login y se cae al navegar.
 
 `PASSWORD_LIMITS.maxBytes` (hoy **72**) limita la contraseña en **bytes**, porque
 es lo que acepta scrypt. Pero OpenAPI no tiene forma de expresar bytes, así que en
-`openapi.json` sale como `maxLength: 72`, y `maxLength` son **caracteres**.
+el contrato sale como `maxLength: 72`, y `maxLength` son **caracteres**.
 
 La consecuencia es real y no es un bug del contrato: una contraseña con `ñ` o con
 emoji puede pasar la validación del cliente y recibir un **400** del servidor. El
@@ -183,10 +183,10 @@ Si cambias `PASSWORD_LIMITS.maxBytes`, esto hay que actualizarlo:
 
 - este párrafo, con el número nuevo
 - `apps/clients/web/CONTRATO.md`, que avisa de lo mismo desde el otro lado
-- el `openapi.json` commiteado, con `pnpm gen:openapi`
 
-Este párrafo es el aviso. No hay test que lo vigila: si alguien cambia la
-constante y no regenera el contrato, el número se queda viejo en silencio.
+Y nada más: el contrato ya no es un fichero, sale del backend, así que el número
+se mueve solo en cuanto se levante. Este párrafo es el aviso. No hay test que lo
+vigile, porque no hay contrato commiteado que se pueda quedar viejo.
 
 ### Swagger **no** lo tapa el guard global
 
@@ -207,13 +207,35 @@ en `common/domain`. **No** inyecta `DataSource` de TypeORM.
 El motivo es concreto y costó encontrarlo: `openapi-spec.module.ts` existe
 precisamente para **no** abrir conexión con Postgres, pero `NestFactory.create`
 instancia todos los providers aunque no se llame a `listen()`. Un caso de uso con
-`DataSource` no se puede construir sin `DatabaseModule`, así que `pnpm gen:openapi`
-falla con `Nest can't resolve dependencies of the RegisterUseCase (?)`.
+`DataSource` no se puede construir sin `DatabaseModule`, así que el grafo del
+módulo de spec falla con `Nest can't resolve dependencies of the RegisterUseCase (?)`.
 
 `TypeormTransactionRunnerAdapter` es el único sitio del proyecto que abre una
 transacción, y el binding va en **los dos** composition roots (`user` y `auth`),
 porque atarlo en uno solo daría dos adapters con dos conexiones distintas, que es
 justo lo que rompe la atomicidad.
+
+### El contrato se genera en vivo, y por eso `ts-node` no sirve
+
+`nest-cli.json` activa `@nestjs/swagger/plugin`. Eso es un **transformador de
+compilador**, no una librería en runtime: solo lo aplican `nest build` y
+`nest start`. Cualquier script que compile con `ts-node` genera un contrato
+**falso**, con las clases de DTO sin `_OPENAPI_METADATA_FACTORY` y por tanto con
+`properties: {}`.
+
+Por eso **no hay `scripts/generate-openapi.ts`** ni `openapi.json` commiteado, y
+el contrato se lee del `/api-json` del backend ya levantado. La razón completa,
+con la comparación entre las dos vías, está en el `AGENTS.md` de la raíz.
+
+Lo que queda de la antigua vía son dos piezas que **sí** se usan:
+
+- `openapi-spec.module.ts`, para el grafo que monta Swagger
+- `ApiEnvelope` y `ApiEnvelopeError`, que describen el sobre de respuesta
+
+Sobre `ApiEnvelope`: **no le pases `status` a mano si el método ya tiene
+`@HttpCode`**. Se incumplió una vez en el login, con `HttpStatus.CREATED` sobre
+un método que responde `200`, y el contrato anunciaba un `201` que no existía
+mientras el `200` real salía vacío.
 
 ### `openapi-spec.module.ts` usa un `DataSource` que no conecta
 
@@ -236,13 +258,6 @@ Usan `@InjectDataSource()`, que pide solo el token `DataSource`.
 `TypeOrmModule.forFeature(...)`, que necesita el `DataSource` **del módulo**, y en
 el módulo de spec no lo hay. Los cuatro de `user` ya lo hacían así; `auth` sigue
 el mismo patrón.
-
-### El script de openapi usa `logger: ['error']`, no `logger: false`
-
-Con `false`, Nest silencia el error y su `ExceptionsZone` hace `process.exit(1)`
-**sin imprimir nada**. El comando falla y no dice por qué, y desde fuera no hay
-forma de diagnosticarlo: hay que replicar el grafo de módulos a mano. Pasó de
-verdad, y costó una investigation entera.
 
 ### El alta cruza dos módulos, y por eso existe `UserCreationPort`
 
@@ -584,7 +599,14 @@ pnpm build
 pnpm lint
 pnpm test
 pnpm test:cov       # con cobertura y umbrales: esto es lo que falla si baja
-pnpm gen:openapi    # regenera el openapi.json commiteado
+```
+
+**No hay `pnpm gen:openapi`.** El contrato se lee del `/api-json` con el backend
+levantado, y de ese JSON se ocupa `web` con su `pnpm gen:live`. Si necesitas ver
+el contrato a mano:
+
+```bash
+curl -s http://localhost:8080/api-json
 ```
 
 **`scripts/probar-guard.ts` prueba el guard por HTTP real**, y merece la pena

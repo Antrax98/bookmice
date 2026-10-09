@@ -1,5 +1,7 @@
 import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
 import { PASSWORD_LIMITS } from '../../domain/models/password.model';
+import { LoginResult } from '../../application/use-cases/login.use-case';
+import { RegisterResult } from '../../application/use-cases/register.use-case';
 
 /**
  * El cuerpo de `POST /auth/register`.
@@ -47,6 +49,11 @@ export class RegisterDto {
   fullName: string;
 }
 
+export class RegisterResultDto implements RegisterResult {
+  userId: string;
+  username: string;
+}
+
 /**
  * El cuerpo de `POST /auth/login`.
  *
@@ -62,4 +69,10 @@ export class LoginDto {
   @IsString()
   @MaxLength(4096)
   password: string;
+}
+
+export class LoginResultDto implements LoginResult {
+  accessToken: string;
+  expiresIn: number;
+  refreshToken: string;
 }
