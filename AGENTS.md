@@ -88,14 +88,31 @@ segundo), así que la migración hay que hacerla a conciencia.
 ## Contrato de API
 
 `web` habla con el backend mediante el contrato OpenAPI, no importando código
-de él. Cuando exista, el plan es:
+de él. El contrato se genera **en vivo**, contra el `/api-json` del backend
+levantado:
 
-- El monolith genera `openapi.json` y se commitea en el repo
-- `web` genera su cliente embebido a partir de ese fichero
+```
+backend andando  ->  GET /api-json  ->  web/src/lib/api/generated.ts
+```
 
-El fichero commiteado es lo que hace que `web` no necesite el backend andando
-para regenerar sus tipos. Ver `apps/services/monolith/AGENTS.md` para el
-detalle de cómo se genera.
+**No hay `openapi.json` commiteado.** Hubo, y se quitó porque generaba un
+contrato **falso**: los DTO salían con `properties: {}`, sin un solo tipo.
+
+El motivo es concreto. `nest-cli.json` activa `@nestjs/swagger/plugin`, que es un
+**transformador de compilador**, y los transformadores solo los aplica
+`nest build` y `nest start`. Un script con `ts-node` compila **sin** él, así que
+las clases no llevan `_OPENAPI_METADATA_FACTORY` y Swagger no tiene nada que
+leer. Comprobado con `curl`, no supuesto:
+
+| | `properties` de `RegisterDto` |
+|---|---|
+| `/api-json` en vivo | `email/format:email`, `password/minLength:12/maxLength:72`, `username`, `fullName` |
+| generado con `ts-node` | `{}` |
+
+El precio de ir en vivo es que **`web` necesita el backend andando** para
+regenerar sus tipos (`pnpm gen:live`). Se paga willingly: un contrato commiteado
+que miente es peor que no tener contrato, porque parece la fuente de verdad y
+nadie se avisa de que está viejo.
 
 Cuando el backend se parta en microservicios reales, cada uno publicará su
 propio contrato y `packages/` contendrá los clientes generados, para que los
