@@ -19,6 +19,8 @@ Frontend del clon de Goodreads. Next.js 16 con App Router.
 
 - `apps/services/monolith/AGENTS.md`: la arquitectura del backend. Léelo antes
   de tocar una llamada a la API, porque de ahí sale el contrato.
+- `CONTRATO.md`, aquí al lado: por qué el `maxLength` de la contraseña son
+  bytes en el servidor y caracteres en el contrato.
 
 ## Estado actual
 
@@ -121,17 +123,30 @@ se reparte:
 - el **BFF** va a `apps/bffs/`, porque es lógica de servidor y no depende del
   framework del frontend
 
-Esa mudanza no hace falta hoy. Pero es la razón por la que el contrato se
-genera desde un fichero y no contra el backend en vivo.
+Esa mudanza no hace falta hoy. Y cuando se haga, el contrato en vivo **no** es un
+obstáculo: cada servicio publicará el suyo en su `/api-json`, y este proyecto
+apuntará al que le toque. Lo que se muda es **dónde vive** el cliente generado,
+no cómo se obtiene.
+
+Un apunte de por qué el contrato va en vivo, que no tiene nada que ver con esto:
+`@nestjs/swagger/plugin` es un transformador de compilador, y `ts-node` no lo
+aplica, así que el `openapi.json` que se commiteaba salía con los DTO vacíos.
+Ver *Habla con el backend por el contrato* más arriba.
 
 ## Comandos
 
 ```bash
-pnpm dev
-pnpm build
-pnpm lint
+pnpm dev:web       # desde la raíz del repo
+pnpm build:web
+pnpm lint:web
 pnpm gen:live      # tipos del contrato; requiere el backend andando
 ```
+
+Están todos en la raíz, porque hay un **workspace de pnpm** con un único
+`pnpm-lock.yaml`. `pnpm dev` a secas levanta las dos apps a la vez; para trabajar
+solo con el front, `pnpm dev:web`.
+
+`pnpm gen:live` también está en la raíz, y es el que se usa para los contratos.
 
 **No hay tests.** Ni runner ni `*.spec.*`. Lo único que falla el build es el
 typecheck y el lint, y eso no comprueba comportamiento. Para el flujo de auth se
@@ -165,16 +180,39 @@ Lo que hay en su lugar, en `eslint.config.mjs`:
   `no-html-link-for-pages` y `no-img-element`. Si necesitas otra, mira cuáles
   usa `eslint-config-next` y cópiala al bloque de reglas de `@next/next`.
 
-Son ~158 reglas activas. Si `pnpm lint` falla tras un `pnpm install` sin que
+Son ~158 reglas activas. Si `pnpm lint:web` falla tras un `pnpm install` sin que
 nadie toque código, lo primero que hay que mirar es si `@eslint-react` movió
 algo: publica seguido.
 
 ## Trampas
 
-**El proxy de sesión (`proxy.ts`) no valida el token.** Solo mira que la cookie
-exista. Validarlo obligaría a llamar al backend en cada carga de una página
-pública, y lo único que decide es qué botones pintar. Si el token está muerto,
-el enlace al panel lleva al login, que es lo mismo que pasa aquí.
+**El proxy de sesión (`src/proxy.ts`) no valida el token.** Solo mira que la
+cookie exista. Validarlo obligaría a llamar al backend en cada carga de página,
+y lo único que decide es a dónde va el visitante. Si el token está muerto, la
+petición que haga devuelve 401 y `proxyClient` lo manda a `/login`.
+
+Su `matcher` es solo `/login` y `/register`: quien ya tiene cookie no los ve.
+La portada `/` **no** está en el matcher a propósito, porque es pública y
+muestra el botón de entrar cuando no hay sesión. Ponerla dentro obligaría a
+convertir la portada en una página que solo existe para gente con cuenta.
+
+**Si algún día `next.config.ts` lleva `output: 'standalone'`, necesita
+`outputFileTracingRoot`.** No lo tiene hoy, y por eso no está. El motivo es el
+workspace: Next ve el `pnpm-lock.yaml` de la raíz, deduce que la raíz del
+proyecto está dos niveles más arriba, y emite el standalone dentro de
+`.next/standalone/apps/clients/web/`. En Docker, donde el contexto de build es
+solo `apps/clients/web`, ese `COPY` apuntaría a la nada y el build falla con un
+error que no menciona el monorepo.
+
+Cuando se añada, va **junto** a `output` y no separado:
+
+```ts
+output: 'standalone',
+outputFileTracingRoot: __dirname,
+```
+
+Es el mismo apunte que tiene el `AGENTS.md` del proyecto `portfolio`, que lo
+descubrió por el camino difícil.
 
 **No hay CSS propio.** `globals.css` y `page.module.css` del `create-next-app`
 se borraron: con `CssBaseline` de MUI, que está montado en `ThemeRegistry`, los

@@ -1,0 +1,60 @@
+# Un solo workspace para las dos apps y lo que venga.
+#
+# Existía la tentación de instalar y ejecutar cada app por separado, y se hizo
+# así a propósito: con dos proyectos que no se hablan, un workspace obligaba a
+# instalar desde la raíz y a pasar todo por `--filter`, a cambio de una
+# coordinación que entonces no hacía falta. Ver `AGENTS.md` para el resto del
+# razonamiento.
+# Ojo al glob: `apps/*` **no** sirve. Baja un solo nivel y encuentra `apps/services`,
+# `apps/clients` y `apps/bffs`, que son carpetas sin `package.json`. Los
+# proyectos están dos niveles abajo, en `apps/services/monolith` y
+# `apps/clients/web`, así que hace falta `apps/*/*`.
+#
+# Se verificó: con `apps/*` el lockfile raíz sale con un solo importer, `.`, y
+# ninguno de los dos proyectos entra en el workspace.
+packages:
+  - apps/*/*
+  - packages/*
+
+# Los scripts de instalación de estas apps.
+#
+# Este mapa es **global**: no se puede repartir por app como estaba antes. Se
+# pone en `true` lo que alguna app necesita, y en `false` lo que alguna app
+# rechaza. Que un paquete no esté en el árbol de una app da igual: pnpm solo
+# mira los que existen.
+#
+# - `unrs-resolver`: lo necesita `monolith`, vía `eslint-import-resolver-typescript`.
+#   Antes web lo tenía en `false`, pero web **no tiene el paquete**: era un resto.
+# - `sharp`: solo está en el árbol de `web`, y ahí se rechaza en `false` a
+#   propósito, para que corra su postinstall.
+# - `@parcel/watcher` y `@scarf/scarf`: los trae `@nestjs/cli`. Con `false`
+#   fallaba el `nest start`.
+allowBuilds:
+  '@parcel/watcher': true
+  '@scarf/scarf': true
+  unrs-resolver: true
+  sharp: false
+
+# pnpm 11 pone `minimumReleaseAge: 1440` (24 horas) **por defecto**, así que esta
+# lista sí hace falta: sin ella, un `@eslint-react/*` publicado hace menos de un
+# día se rechazaría al instalar. Los `@eslint-react` salían de una cadena de
+# suministro de npm comprometida en 2025, y 24 horas de espera no cortan eso, pero
+# tampoco estorban a instalar versiones limpias.
+#
+# La lista se sube aquí desde el `pnpm-workspace.yaml` de `web`, porque en un
+# workspace estas Exclusion son globales igual que `allowBuilds`: si se quedan
+# en un subdirectorio, dejan de aplicarse.
+minimumReleaseAgeExclude:
+  - '@eslint-react/ast@5.24.6'
+  - '@eslint-react/core@5.24.6'
+  - '@eslint-react/eslint-plugin@5.24.6'
+  - '@eslint-react/eslint@5.24.6'
+  - '@eslint-react/jsx@5.24.6'
+  - '@eslint-react/shared@5.24.6'
+  - '@eslint-react/var@5.24.6'
+  - eslint-plugin-react-dom@5.24.6
+  - eslint-plugin-react-jsx@5.24.6
+  - eslint-plugin-react-naming-convention@5.24.6
+  - eslint-plugin-react-rsc@5.24.6
+  - eslint-plugin-react-web-api@5.24.6
+  - eslint-plugin-react-x@5.24.6

@@ -1,0 +1,30 @@
+{
+  "name": "bookmice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workspace de Bookmice. El codigo vive en apps/, y aqui solo esta el wiring.",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.21.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --stream -r dev",
+    "dev:api": "pnpm --filter monolith dev",
+    "dev:web": "pnpm --filter web dev",
+
+    "build": "pnpm -r build",
+    "build:api": "pnpm --filter monolith build",
+    "build:web": "pnpm --filter web build",
+
+    "lint": "pnpm -r lint",
+    "lint:api": "pnpm --filter monolith lint",
+    "lint:web": "pnpm --filter web lint",
+
+    "test": "pnpm -r --if-present test",
+    "test:api": "pnpm --filter monolith test",
+    "test:cov": "pnpm --filter monolith test:cov",
+
+    "gen:live": "pnpm --filter web gen:live",
+    "format": "pnpm -r --if-present format"
+  }
+}

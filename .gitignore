@@ -13,6 +13,11 @@
 *.swp
 *~
 
+# Workspace. Aquí es donde vive el store de pnpm, así que la raíz tiene que
+# ignorarlo: los `.gitignore` de cada app usan `/node_modules` anclado y solo
+# cubren los suyos.
+/node_modules
+
 # Entorno. Los `.env` de las apps ya están cubiertos por los suyos; esto cubre
 # el de la raíz, que es donde acaba cayendo el que alguien copia "para probar".
 .env

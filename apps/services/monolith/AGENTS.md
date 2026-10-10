@@ -475,7 +475,7 @@ existe HTTP.
 ## Trampas
 
 **Los `composition/container.ts` están vacíos**, y los `<módulo>.module.ts` no
-tienen controladores ni `imports`. Es el estado esperado: `pnpm start` levanta
+tienen controladores ni `imports`. Es el estado esperado: `pnpm dev` levanta
 sin ninguna ruta hasta que escribas los bindings y las clases. No es un fallo.
 
 **`src/migrations/` no existe.** La crea el primer `pnpm migration:generate`.
@@ -496,6 +496,19 @@ No es `pnpm migration:generate` a secas: falla con `Not enough non-option
 arguments`. Si añades un `&&` delante de un comando de TypeORM, **pnpm deja de
 reenviar los argumentos**, y el fallo vuelve a ser ese. Por eso la creación del
 schema está dentro de `data-source.ts` y no encadenada en el script.
+
+**Los comandos de migración son los únicos que se ejecutan desde esta carpeta**,
+o con `--filter`, porque no hay equivalente en la raíz. Y el argumento
+posicional es una ruta **relativa al proyecto**, no a la raíz del repo:
+
+```bash
+cd apps/services/monolith
+pnpm migration:generate src/migrations/Algo.ts
+```
+
+Esto no contradice lo de *Verificar*: `pnpm` ejecutado dentro de una app sube
+solo hasta el workspace y usa el lockfile de la raíz. Lo único que cambia es el
+directorio de trabajo.
 
 ## El schema de Postgres
 
@@ -589,17 +602,24 @@ comodidad, no un sustituto.
 **El lint tarda unos 8 segundos.** Es a propósito: boundaries resuelve el grafo
 de imports en cada pasada. No lo declares roto ni lo saltees.
 
-**`pnpm start` sin Postgres** se queda reintentando la conexión. Es normal si el
+**`pnpm dev:api` sin Postgres** se queda reintentando la conexión. Es normal si el
 `compose up -d` no está levantado.
 
 ## Verificar
 
+Estos comandos son **de la raíz del repo**, no de esta carpeta. La raíz tiene un
+workspace de pnpm con un único `pnpm-lock.yaml`.
+
 ```bash
-pnpm build
-pnpm lint
-pnpm test
+pnpm build:api
+pnpm lint:api
+pnpm test:api
 pnpm test:cov       # con cobertura y umbrales: esto es lo que falla si baja
 ```
+
+`pnpm install` **también** va desde la raíz. Si ejecutas `pnpm` dentro de
+`apps/services/monolith`, pnpm sube hasta el workspace por su cuenta, así que no
+rompe nada, pero el sitio donde se escribe el lockfile es la raíz.
 
 **No hay `pnpm gen:openapi`.** El contrato se lee del `/api-json` con el backend
 levantado, y de ese JSON se ocupa `web` con su `pnpm gen:live`. Si necesitas ver
@@ -626,8 +646,8 @@ como test unitario del guard.
 **Falta un typecheck de los specs, y no lo pongas.** Ni `build` ni `test`
 comprueban los tipos de `*.spec.ts`:
 
-- `pnpm build` usa `tsconfig.build.json`, que solo incluye `src` sin tests.
-- `pnpm test` va por `ts-jest`, que no para la ejecución por un error de tipos.
+- `pnpm build:api` usa `tsconfig.build.json`, que solo incluye `src` sin tests.
+- `pnpm test:api` va por `ts-jest`, que no para la ejecución por un error de tipos.
 
 Salió de verdad: un test con `errors[0]` sobre un `ApiErrorDetail[] | null`
 pasaba en verde y no compilaba con `tsc`. Para cerrarlo:
@@ -639,7 +659,7 @@ npx tsc --noEmit -p tsconfig.json
 ## Cobertura de tests
 
 `pnpm test:cov` es el que **hace cumplir** los umbrales de `jest.config.ts`. Un
-`pnpm test` a secas no recoge cobertura y por tanto no falla nunca, aunque el
+`pnpm test:api` a secas no recoge cobertura y por tanto no falla nunca, aunque el
 `test` pase: si algún día hay CI, tiene que correr `test:cov`, no `test`.
 
 El número que sale es **100 stmts / 88.68 branches / 100 funcs / 100 lines**.
