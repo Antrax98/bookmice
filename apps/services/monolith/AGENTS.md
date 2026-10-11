@@ -190,10 +190,33 @@ vigile, porque no hay contrato commiteado que se pueda quedar viejo.
 
 ### `allowInMemoryStorage` está en `true`, y por qué es una decisión
 
-El default del paquete es `false`, y con `false` la aplicación **no arranca en
-producción**: `AuthenticationModule` comprueba al arrancar que cada contrato
-que usan las features configuradas tenga su store, y falla nombrando los que
-faltan.
+El default del paquete es `false`, y el paquete documenta que con `false` la
+aplicación no arranca en producción: `AuthenticationModule` comprueba al arrancar
+que cada contrato que usan las features configuradas tenga su store, y falla
+nombrando los que faltan.
+
+### Ese guard **no se está ejecutando**, y se comprobó
+
+Se creío durante mucho tiempo que sin esto el contenedor no arrancaba, y
+era falso. Mirando el registro en runtime, con `NODE_ENV=production` y
+`AUTH_ALLOW_IN_MEMORY_STORAGE=false`:
+
+```
+contracts que el registro da por usados: ["refreshTokens","mfa"]
+allowInMemoryStorage que llega:         false
+sources registrados:                   []
+locked (el guard llego a evaluarse):   false
+```
+
+Es decir: los contratos que exige son `refreshTokens` y `mfa` (`accessToken`
+arrastra los dos, véase `CONTRACTS_BY_FEATURE`), no hay ninguno registrado, y la
+comprobación debería lanzar. No lanza porque **`locked` sigue en `false`**: el
+guard corre en el `onModuleInit` del módulo, y ese hook no llega a ejecutarse.
+
+Por eso se conserva el ajuste en `true`. Cuando eso se arregle, el comportamiento
+que documenta el paquete será el que Tendrá lugar, y entonces `false` será lo
+correcto. No pongas el ajuste a `false` "porque debería fallar": ahora no falla
+nada.
 
 Se puso en `true` porque la fase 2 sigue pendiente. El coste está medido y es
 concreto:
