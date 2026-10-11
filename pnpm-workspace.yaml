@@ -58,3 +58,4 @@ minimumReleaseAgeExclude:
   - eslint-plugin-react-rsc@5.24.6
   - eslint-plugin-react-web-api@5.24.6
   - eslint-plugin-react-x@5.24.6
+  - prettier@3.9.10
