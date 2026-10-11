@@ -1,0 +1,68 @@
+name: Verificar
+
+# Esto NO publica nada. Corre en cada push a `master` para que la rama no se
+# degrade en silencio entre tags.
+#
+# Existe separado de `docker.yml` a propósito. Ese publica **solo por tags**, que
+# es lo correcto: publicar en cada commit llena el registro de imágenes que nadie
+# despliega. Pero si el único workflow del repo escucha a tags, entonces entre
+# `v0.1.0` y `v0.2.0` **nada comprueba nada**, y te enteras de que master está
+# roto el día que creas el tag. Entonces el fallo aparece donde no se puede
+# arreglar, porque el código malo ya está commiteado.
+#
+# Los dos juntos: este avisa, `docker.yml` publica.
+on:
+  push:
+    branches: ['master']
+  pull_request:
+  workflow_dispatch:
+
+# Acá no hace falta `packages: write`: este workflow nunca toca el registro.
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # La versión sale del `.nvmrc`, que es la misma que fijan el `engines` del
+      # `package.json` raíz y las dos imágenes. Hardcodearla aquí sería un
+      # cuarto sitio que mantener.
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # Next 16 quitó `next lint` del build, así que `next build` **no lintea**.
+      # Este paso no es redundante con el de abajo: es el único que lo hace.
+      - name: Lint
+        run: pnpm lint
+
+      # `test:cov` y no `test`, y por lo que ya está escrito en el AGENTS.md del
+      # monolith: un `pnpm test` a secas no recoge cobertura, así que los
+      # `coverageThreshold` **no se miran**. No es que la cobertura falle, es que
+      # nadie la lee, y el job pasa en verde.
+      - name: Tests con umbrales de cobertura
+        run: pnpm test:cov
+
+      # Ni `build` ni `test` comprueban los tipos de `*.spec.ts`: el build usa
+      # `tsconfig.build.json`, que solo incluye `src`, y los tests van por
+      # ts-jest, que no para la ejecución por un error de tipos. Sin esto, un
+      # spec con `errors[0]` sobre `ApiErrorDetail[] | null` pasa en verde y no
+      # compila. Salió de verdad.
+      - name: Typecheck del monolith (incluye los specs)
+        run: pnpm --filter monolith exec tsc --noEmit -p tsconfig.json
+
+      # `web` no tiene script `test`, y el `--if-present` de la raíz lo hace
+      # pasar en silencio. Este job da verde sin haber comprobado el front, y
+      # es a conciencia hasta que se escriban esos tests.
+      - name: Build de las dos apps
+        run: pnpm build

@@ -1,0 +1,167 @@
+name: Docker
+
+# Publica **solo por tags**, no en cada push. Publicar en cada commit llena el
+# registro de imágenes que nadie despliega y gasta minutos de runner que en un
+# homelab no sobran. El tag es la decisión de «esto sí va a producción».
+#
+# El glob `v*.*.*` cubre `v0.1.0`, `v1.2.3` y `v0.2.0-rc1`. Lo comprobado:
+#
+#   DISPARA  v0.1.0  v1.2.3  v10.20.30  v0.2.0-rc1  v0.1.0-beta
+#   NO       v1.2  v1  1.2.3
+#
+# O sea: `v1.2` **no dispara nada**, y un tag mal escrito se descubre tarde,
+# cuando te preguntas por qué no se publicó. Es lo que hace que el primer tag
+# tenga que ser de tres partes, `v0.1.0`.
+#
+# Y el glob es más laxo de lo que parece: también dispara con `v1.2.3.4` y con
+# `va.b.c`. No molesta en un homelab, pero si algún día importa, el sitio para
+# ponerlo es un paso que valide la versión, no un glob.
+#
+# Y `workflow_dispatch` sigue ahí: cuando ArgoCD este sincronizando va a haber
+# builds que interesa repetir sin haber tocado nada.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+# `GITHUB_TOKEN` no puede escribir en el registro sin esto. Sin `packages: write`
+# el login funciona y el push falla, que es el peor sitio para descubrirlo.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ── Etapa 1: verificar ───────────────────────────────────────────
+  # Va PRIMERO a propósito. Un `docker build` de este repo tarda del orden de
+  # minutos; el lint y los tests, menos de uno. Al revés se gastan minutos de
+  # runner en una imagen que después se tira.
+  #
+  # Los mismos pasos que `verificar.yml`, y a propósito. Publicar sin comprobar
+  # primero significaría que un tag con el lint roto produce una imagen
+  # publicable, y el fallo aparece en el registro, no en el código. Aquí el
+  # fallo sale con el nombre del fichero y la línea.
+  #
+  # Lo que NO se hace es confiar en el job del otro workflow: los dos
+  #/workflows son independientes por diseño, y un `workflow_run` ataría la
+  # publicación a que ese job pasara **en esa ejecución concreta**.
+  verificar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # La versión sale del `.nvmrc` de la raíz, que es la misma que fija el
+      # `engines` del `package.json` raíz y la de las dos imágenes. Dejarlo
+      # hardcodeado aquí sería un cuarto sitio que mantener.
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # Next 16 quitó `next lint` del build, y el `Dockerfile` de `web` no corre
+      # un solo test. O sea: esto NO es redundante con el `docker build` que viene
+      # después. Es lo único que lintea, y sin él la imagen se construye con
+      # código que no pasa el linter y nadie se entera.
+      - name: Lint
+        run: pnpm lint
+
+      # `test:cov` y no `test`. Un `pnpm test` a secas no recoge cobertura, así
+      # que los `coverageThreshold` del `jest.config.ts` **no se miran**: no es
+      # que la cobertura falle, es que nadie la lee, y el job pasa en verde.
+      - name: Tests con umbrales de cobertura
+        run: pnpm test:cov
+
+      # Ni `build` ni `test` miran los tipos de `*.spec.ts`.
+      - name: Typecheck del monolith (incluye los specs)
+        run: pnpm --filter monolith exec tsc --noEmit -p tsconfig.json
+
+      # `web` no tiene script `test`, y el `--if-present` de la raíz lo hace
+      # pasar en silencio: esto da verde sin haber comprobado el front. Es a
+      # conciencia hasta que se escriban esos tests.
+      - name: Build de las dos apps
+        run: pnpm build
+
+  # ── Etapa 2: publicar ────────────────────────────────────────────
+  # `needs: verificar` es lo que lo convierte en dos etapas y no una: si el
+  # lint falla, aquí no llega a ejecutarse ni un `docker build`.
+  publicar:
+    needs: verificar
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # El nombre del usuario **no** se escribe: sale de `github.repository`.
+      # Escribirlo a mano es la forma de equivocarse, y el error que sale habla
+      # de credenciales, no del nombre. Mismo motivo para no escribir el
+      # login: es quien lanza el workflow.
+      #
+      # El `tr` a minúsculas no es decoración. GitHub preserva mayúsculas en
+      # usuarios y repos, y **Docker las rechaza en el nombre de la imagen**.
+      # El error dice "repository name must be lowercase", que no parece hablar
+      # de login, y por eso despista tanto.
+      - name: Normalizar el nombre (Docker exige minúsculas)
+        run: |
+          echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      # Cada imagen lleva **dos** etiquetas, y las dos se usan:
+      #
+      # - `<sha>` es la que ArgoCD fija. Dice exactamente qué commit se
+      #   despliega, sin ambigüedad, y un rollback es cambiar una línea.
+      # - `<version>` es la que se lee. `v0.1.0` en el registro dice algo;
+      #   `a1b2c3d` no. Es la diferencia entre mirar qué hay desplegado y tener
+      #   que comprobar commit por commit.
+      #
+      # Con `workflow_dispatch` no hay tag, así que `VERSION` queda vacía y solo
+      # se publica la del SHA. Con eso el build manual nunca pisa una versión.
+      - name: Calcular la versión del tag
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "VERSION=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=" >> "$GITHUB_ENV"
+          fi
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Las dos imágenes van **en paralelo**: no dependen entre sí y el runner
+      # es gratis por minutos. Cada una declara su `context: .` porque el
+      # contexto de build es la raíz del repo, no la carpeta de la app: es un
+      # workspace de pnpm con un único lockfile y sin él `pnpm install
+      # --frozen-lockfile` no tiene contra qué trabajar.
+      - name: Construir y subir la API
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./apps/services/monolith/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/bookmice-api:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/bookmice-api:${{ env.VERSION }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Construir y subir el front
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./apps/clients/web/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/bookmice-web:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/bookmice-web:${{ env.VERSION }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web

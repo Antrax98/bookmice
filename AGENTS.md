@@ -224,6 +224,107 @@ Sin eso, todo `pnpm install --frozen-lockfile` falla con
 Hoy no cambia nada, porque **ninguna de las dos apps depende de la otra**. Se
 comprobó: si algún día hubiera sido otro, el install lo habría notado.
 
+## Hay dos workflows, y no es duplicado
+
+| Fichero | Dispara con | Qué hace |
+|---|---|---|
+| `verificar.yml` | push a `master`, PR, a mano | lint, tests, typecheck, build. **No publica.** |
+| `docker.yml` | **tags `v*.*.*`**, a mano | verifica y publica las dos imágenes en GHCR |
+
+Publicar solo por tags es lo correcto: publicar en cada commit llena el registro
+de imágenes que nadie despliega y gasta minutos de runner. Pero si el único
+workflow escuchara a tags, **entre `v0.1.0` y `v0.2.0` nada comprobaría nada**, y
+te enterarías de que `master` está roto el día que creas el tag: el fallo aparece
+donde ya no se puede arreglar, con el código malo commiteado. Por eso están los
+dos.
+
+`docker.yml` **vuelve a verificar** en vez de confiar en el job del otro. No es
+redundancia gratuita: un `workflow_run` ataría la publicación a que ese job
+pasara **en esa ejecución concreta**, que es una acoplamiento frágil. Verificar
+cuesta menos de un minuto; un `docker build`, del orden de minutos. Se paga.
+
+### Las dos etiquetas de cada imagen
+
+```
+ghcr.io/<usuario>/bookmice-api:<sha>     <- la que fija ArgoCD
+ghcr.io/<usuario>/bookmice-api:v0.1.0    <- la que se lee
+```
+
+El **SHA** es lo que ArgoCD despliega: dice exactamente qué commit va, sin
+ambigüedad, y un rollback es cambiar una línea. La **versión** es para leer: en el
+registro, `v0.1.0` dice algo y `a1b2c3d` no. Sin ella, saber qué hay desplegado
+es comprobar commit por commit.
+
+No hay etiqueta `latest` a propósito: con ella no hay forma de saber si el
+cluster está al día.
+
+Con `workflow_dispatch` no hay tag, así que `VERSION` queda vacía y solo se
+publica la del SHA. Con eso un build manual **nunca pisa una versión**.
+
+### El glob de tags es más laxo de lo que parece
+
+Comprobado con `fnmatch` contra `v*.*.*`:
+
+```
+DISPARA  v0.1.0   v1.2.3   v10.20.30   v0.2.0-rc1   v0.1.0-beta
+DISPARA  v1.2.3.4   va.b.c
+NO       v1.2   v1   1.2.3
+```
+
+`v1.2` **no dispara nada**, y un tag mal escrito se descubre tarde, cuando ya te
+preguntas por qué no se publicó. Los tags en este repo son **siempre de tres
+partes**.
+
+### El usuario de GHCR no se escribe
+
+```yaml
+username: ${{ github.actor }}   # quien lanza el workflow
+# nombre: ${{ github.repository }}
+```
+
+Viene de variables de contexto. Escribirlo a mano es la forma de equivocarse, y
+el error que sale habla de credenciales, no del nombre.
+
+Lo que **sí** hace falta es normalizar a minúsculas, porque GitHub preserva
+mayúsculas en usuarios y repos y **Docker las rechaza**:
+
+```
+invalid reference format: repository name must be lowercase
+```
+
+Ese error no parece hablar de login, que es lo que lo hace despistar.
+
+### El nombre de usuario y el de GHCR van en minúsculas por culpa de Docker
+
+El `tr` de `OWNER` no es decoración. Sin él, y con el usuario en mayúscula, el
+build falla **después** de todos los pasos de verificación, que es el sitio más
+caro para descubrirlo.
+
+### `pnpm test` en CI es un check que no existe
+
+Los workflows usan **`test:cov`**, y no por gusto. Un `pnpm test` a secas no
+recoge cobertura, así que los `coverageThreshold` del `jest.config.ts` **no se
+leen**. No es que la cobertura falle: es que nadie la mira.
+
+Comprobado subiendo el umbral a un valor imposible:
+
+```
+pnpm test      -> exit=0     con statements: 1000
+pnpm test:cov  -> exit=1     "does not meet global threshold (1000%)"
+```
+
+### `next build` ya no lintea, y `web` no tiene tests
+
+Las dos razones por las que el paso de lint del workflow **no** es redundante
+con el `docker build`:
+
+- **Next 16 quitó `next lint` del build.** No hay ni el binario. O sea que el
+  `Dockerfile` de `web` construye una imagen **sin lintear**, y el único sitio
+  donde se lintea es ese paso.
+- **`web` no tiene script `test`**, y el `--if-present` de la raíz lo hace pasar
+  en silencio. Los dos workflows dan verde **sin comprobar el front**. Es a
+  conciencia hasta que se escriban esos tests.
+
 ## Contrato de API
 
 `web` habla con el backend mediante el contrato OpenAPI, no importando código
