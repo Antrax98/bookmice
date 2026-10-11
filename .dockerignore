@@ -1,0 +1,54 @@
+# Contexto de build de las imagenes de Docker.
+#
+# Vive en la RAIZ porque las dos imagenes se construyen con el repo entero como
+# contexto: bookmice es un workspace de pnpm con un unico lockfile, y su
+# Dockerfile necesita la raiz para instalar.
+#
+# Sin esto, el contexto se lleva tus 934 paquetes de node_modules y el .git
+# entero a cada build. Eso no es solo lento: Docker tiene que LEER esos ficheros
+# antes de empezar, aunque la capa no los use.
+
+# Dependencias: se reinstalan dentro de la imagen. Copiarlas es lo que hace que
+# la capa de deps solo se invalide cuando cambian las dependencias.
+node_modules
+**/node_modules
+
+# pnpm tiene su estado en node_modules, pero el store global tambien estorba.
+.pnpm-store
+
+# Git: no lo necesita el build y es el directorio más grande del repo.
+.git
+.gitignore
+.github
+
+# Compilados: los regenera el build dentro de la imagen. Si se copiaran, la
+# imagen traeria el dist de tu maquina, hecho con otro node y otro sistema.
+**/dist
+**/.next
+**/out
+**/build
+
+# Secretos. Este es el que mas importa: con el contexto entero, un .env se
+# acabaria en una capa de la imagen aunque no lo copies en ningun sitio.
+.env
+.env.*
+!.env.example
+
+# Documentacion y ficheros que no afectan al build. No es soloCleanup: bajan el
+# contexto y ademas evitan que un cambio en un .md dispare un build entero.
+**/*.md
+**/*.adoc
+AGENTS.md
+CLAUDE.md
+
+# Editores y SO
+.vscode
+.idea
+.DS_Store
+*.swp
+
+# Varios
+coverage
+.nvmrc
+eslint.config.mjs
+.eslintcache
