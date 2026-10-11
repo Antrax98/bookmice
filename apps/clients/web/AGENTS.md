@@ -222,35 +222,151 @@ La portada `/` **no** está en el matcher a propósito, porque es pública y
 muestra el botón de entrar cuando no hay sesión. Ponerla dentro obligaría a
 convertir la portada en una página que solo existe para gente con cuenta.
 
-**Si algún día `next.config.ts` lleva `output: 'standalone'`, necesita
-`outputFileTracingRoot`.** No lo tiene hoy, y por eso no está. El motivo es el
-workspace: Next ve el `pnpm-lock.yaml` de la raíz, deduce que la raíz del
-proyecto está dos niveles más arriba, y emite el standalone dentro de
-`.next/standalone/apps/clients/web/`. En Docker, donde el contexto de build es
-solo `apps/clients/web`, ese `COPY` apuntaría a la nada y el build falla con un
-error que no menciona el monorepo.
+## `outputFileTracingRoot` apunta a la raíz del repo, **no** a `__dirname`
 
-Cuando se añada, va **junto** a `output` y no separado:
+`next.config.ts` lleva `output: 'standalone'` y esta línea:
 
 ```ts
-output: 'standalone',
-outputFileTracingRoot: __dirname,
+outputFileTracingRoot: path.join(__dirname, '../../..'),
 ```
 
-Es el mismo apunte que tiene el `AGENTS.md` del proyecto `portfolio`, que lo
-descubrió por el camino difícil.
+**Antes este `AGENTS.md` recomendaba `__dirname`, y aquí eso está mal.** Venía
+del proyecto `portfolio`, que no es un workspace de pnpm y ahí sí funcionaba. Se
+corrigió al escribir el `Dockerfile`.
 
-**El `Dockerfile` de `web` todavía no existe**, y cuando exista tiene que usar
-el contexto de la **raíz del repo**, como el del monolith. Ver *El Dockerfile* en
-el `AGENTS.md` del monolith, que explica el mecanismo del workspace entero.
+El motivo es que el standalone traza ficheros de paquetes que **no viven en
+`apps/clients/web/node_modules`**, sino en el store de pnpm, dos niveles más
+arriba: `/app/node_modules/.pnpm/next@16.3.8…/node_modules/next/dist/…`.
 
-Va antes que nada lo de `standalone`, porque sin esto el `COPY` falla con un error
-que no menciona el monorepo:
+Next decide dónde escribir cada fichero con dos `path`:
 
-```ts
-output: 'standalone',
-outputFileTracingRoot: __dirname,
+```js
+// next/dist/build/index.js, copyTracedFiles
+path.join(outputPath, path.relative(tracingRoot, tracedFilePath))
 ```
+
+Con `tracingRoot = /app/apps/clients/web`, el `relative` de `next` sale
+`../../../node_modules/.pnpm/…`, y el `join` lo escribe **fuera** de
+`.next/standalone/`, en el árbol de fuentes. El standalone se queda sin
+`node_modules` y el arranque muere con `Cannot find module 'next'`.
+
+Lo que hace el fallo útil: **el error no menciona el monorepo**. Por eso este
+aviso. Next solo valida que la ruta sea absoluta; que apunte al sitio correcto
+no lo comprueba.
+
+Next lo deduciría solo (`find-root.js` busca `pnpm-workspace.yaml` antes que
+lockfiles, y lo encuentra en la raíz), pero está explícito a propósito: si el
+repo se mueve de sitio o el marcador del workspace cambia de nombre, el fallo
+tiene que ser un `next.config.ts` que se ve, no un `COPY` del `Dockerfile` que no
+encuentra nada.
+
+`__dirname` funciona aquí porque Next carga el `.ts` con un require-hook de CJS
+(`transpile-config.js`), no como ESM.
+
+## El `Dockerfile` de `web`
+
+Existe, en esta carpeta, con el contexto de build en la **raíz del repo**:
+`docker build -f apps/clients/web/Dockerfile .`. Ver *El Dockerfile* en el
+`AGENTS.md` del monolith, que explica el mecanismo del workspace entero.
+
+Tres cosas que se aprenden por el camino y no se ven leyendo el fichero:
+
+**No hay etapa `prod-deps` ni `pnpm deploy`.** El standalone de Next ya es
+autocontenido: traza y copia los ficheros que el servidor usa. Es el mecanismo
+contrario al de Nest, así que aquí `injectWorkspacePackages` no aparece en el
+camino crítico.
+
+**`public/` y `.next/static` se copian a mano.** Next standalone no los incluye,
+y van a `apps/clients/web/…` porque el `server.js` también vive ahí anidado:
+
+```dockerfile
+COPY --from=build /app/apps/clients/web/.next/standalone ./
+COPY --from=build /app/apps/clients/web/.next/static ./apps/clients/web/.next/static
+COPY --from=build /app/apps/clients/web/public ./apps/clients/web/public
+CMD ["node", "apps/clients/web/server.js"]
+```
+
+**`ENV HOSTNAME=0.0.0.0` no es opcional, y se comprobó.** El `server.js` que
+genera Next lleva:
+
+```js
+const hostname = process.env.HOSTNAME || '0.0.0.0'
+```
+
+y Docker **pone `HOSTNAME` con el ID del contenedor**. Sin esa línea el servidor
+intenta escuchar en un hostname que no existe. Simulado con el standalone real:
+
+```
+⨯ Failed to start server
+Error: getaddrinfo ENOTFOUND deadbeef01
+    errno: -3007,  syscall: 'getaddrinfo',  hostname: 'deadbeef01'
+```
+
+El mensaje **no menciona `HOSTNAME`** en ningún sitio: es un `getaddrinfo` que
+apunta al nombre del contenedor. En local no se nota nunca, porque ahí `HOSTNAME`
+es el hostname de la máquina y ese sí resuelve.
+
+**El healthcheck va contra `/`**, que es dinámica porque `AppNavbar` llama a
+`cookies()`, y sin cookie **no toca el backend**: no depende de que la API esté
+viva, solo de que Next responda.
+
+**`BACKEND_URL` no se pasa en la etapa de build**, a propósito. No lleva
+`NEXT_PUBLIC_`, así que Next no lo inlinea y el servidor lo lee de `process.env`
+al arrancar: se cambia el backend sin recompilar.
+
+**El `.env` acaba dentro del `.next/standalone`, y eso es un accidente.** Next
+copia los ficheros de entorno que ha cargado al directorio de salida:
+
+```
+.next/standalone/apps/clients/web/.env    <- contiene BACKEND_URL
+```
+
+Ahora no llega a la imagen **solo porque el `.dockerignore` de la raíz excluye
+`.env`**, y eso se comprobó. Si algún día se afloja ese `.dockerignore` (por
+optimizar contexto, por bajar a un contexto por app…), la URL del backend se
+copia en la imagen sin que nada lo anuncie.
+
+Es la misma clase de trampa que la del `DB_SCHEMA` con comillas en el
+`AGENTS.md` del monolith: **un valor que funciona en local y se rompe en el
+contenedor**, y el único sitio donde se ve es la imagen.
+
+## Alpine es musl, y `sharp` es el sitio donde se nota
+
+La imagen es `node:24.21.0-alpine`, y **alpine usa musl como libc estándar**.
+No es "compatible con glibc": es otra libc. Por eso el `Dockerfile` del monolith
+necesita `apk add libc6-compat`, que no hace que musl sea glibc, solo evita que
+algunos binarios del toolchain de Nest fallen.
+
+**`sharp` es el punto delicado de esta app, aunque hoy no se use.** Es una
+dependencia opcional de `next`, y no viene como un paquete con binario dentro:
+son **varios paquetes precompilados por plataforma**, y musl y glibc son
+plataformas distintas, con paquetes distintos:
+
+```
+@img/sharp-linux-x64         <- glibc
+@img/sharp-linuxmusl-x64    <- alpine
+@img/sharp-libvips-linuxmusl-x64   (y su par glibc)
+```
+
+Los cuatro están en el `pnpm-lock.yaml`, y pnpm instala el que corresponde a la
+plataforma. En el `store` de tu portátil solo aparecen los de glibc
+(`ldd --version` → `2.44`), que es lo esperable: no es que falten los musl.
+
+Ahora mismo **no es un problema, y hay que saber por qué**: la app no usa
+`next/image` ni una sola vez (comprobado: `grep` de `next/image` y `<Image` en
+`src/` no devuelve nada), así que el optimizador no llega a cargarse.
+
+El día que meta una portada de libro, esto es lo primero que revienta, en este
+orden:
+
+1. `allowBuilds: sharp: false` en el `pnpm-workspace.yaml` evita el `postinstall`
+   de sharp.
+2. Si el día de mañana hace falta ese `postinstall` en alpine, hay que pasarlo a
+   `true`. Ojo: `allowBuilds` es un mapa **global** del workspace, no por app.
+
+Y como `sharp` es opcional de `next`, si el binario de la plataforma no está, el
+síntoma **no** es un error de arranque: es un `next/image` que devuelve un error
+en la petición de la imagen. Más difícil de leer que un fallo de build.
 
 **No hay CSS propio.** `globals.css` y `page.module.css` del `create-next-app`
 se borraron: con `CssBaseline` de MUI, que está montado en `ThemeRegistry`, los
