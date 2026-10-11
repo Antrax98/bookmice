@@ -171,6 +171,59 @@ hubiera quedado en el `pnpm-workspace.yaml` de `web`, habría dejado de excluir.
 cat node_modules/.pnpm-workspace-state-v1.json | grep -A3 minimumReleaseAge
 ```
 
+## Las imágenes de Docker se construyen desde la RAÍZ
+
+El contexto de build de las dos imágenes es **el repo entero**, no la carpeta de
+la app. Es la consecuencia directa de ser un workspace: para instalar hace falta
+la raíz, con su `package.json`, su `pnpm-lock.yaml` y su `pnpm-workspace.yaml`.
+
+Cada `Dockerfile` copia **los dos** `package.json` de las apps aunque solo compile
+una. No es redundancia: el lockfile tiene un bloque `importers` por proyecto, y
+`--frozen-lockfile` compara contra todos. Si faltara el de `web`, la comparación
+falla aunque no se vaya a instalar. Comprobado.
+
+Y `pnpm install --filter monolith` instala **solo esa app**: tras el install,
+`web` tiene 0 paquetes y el store no contiene ni un MUI ni un Next. Comprobado
+también.
+
+### `injectWorkspacePackages: true` es lo que hace funcionar `pnpm deploy`
+
+Va en `pnpm-workspace.yaml`, y **en camelCase**. En kebab-case pnpm lo ignora con
+un aviso y el deploy falla igual:
+
+```
+[WARN] The following settings in pnpm-workspace.yaml were ignored because
+they are not written in camelCase: "inject-workspace-packages"
+[ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE]
+```
+
+Lo que cambia es cómo se resuelven las dependencias **entre paquetes del
+workspace**: con `false` pnpm pone un symlink, con `true` copia el código. Importa
+porque `pnpm deploy` construye un directorio para una imagen de Docker, y un
+symlink que sale de ese directorio no sobrevive a un `COPY`.
+
+Sin esto, las dos alternativas son malas:
+
+- `--legacy`: la vía antigua, funciona, pero solo con symlinks. Se dejó de lado
+  porque el plan es llenar `packages/` con permisos tipados compartidos, y ese es
+  justo el caso en el que la inyección importa.
+- install normal y copiar el `node_modules` de la app: `pnpm` deja symlinks
+  **relativos** a `../../../node_modules/.pnpm/`. Copiar solo ese `node_modules`
+  deja los enlaces colgando y el módulo aparece como inexistente, con un
+  `Cannot find module` que no señala al symlink.
+
+**Cambiar el ajuste obliga a regenerar el lockfile**, porque pnpm lo guarda ahí:
+
+```
+pnpm install --no-frozen-lockfile
+```
+
+Sin eso, todo `pnpm install --frozen-lockfile` falla con
+`ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, que no dice nada de estos symlinks.
+
+Hoy no cambia nada, porque **ninguna de las dos apps depende de la otra**. Se
+comprobó: si algún día hubiera sido otro, el install lo habría notado.
+
 ## Contrato de API
 
 `web` habla con el backend mediante el contrato OpenAPI, no importando código

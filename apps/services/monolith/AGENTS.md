@@ -188,6 +188,27 @@ Y nada más: el contrato ya no es un fichero, sale del backend, así que el núm
 se mueve solo en cuanto se levante. Este párrafo es el aviso. No hay test que lo
 vigile, porque no hay contrato commiteado que se pueda quedar viejo.
 
+### `allowInMemoryStorage` está en `true`, y por qué es una decisión
+
+El default del paquete es `false`, y con `false` la aplicación **no arranca en
+producción**: `AuthenticationModule` comprueba al arrancar que cada contrato
+que usan las features configuradas tenga su store, y falla nombrando los que
+faltan.
+
+Se puso en `true` porque la fase 2 sigue pendiente. El coste está medido y es
+concreto:
+
+- **cada reinicio del pod cierra todas las sesiones**, porque viven en la memoria
+  del proceso
+- **no se pueden tener dos réplicas**, porque no compartirían estado
+
+En un homelab de una persona, las dos cosas no importan. En cuanto lo haya, sí.
+
+Se decide en `config/configuration.ts`, no en la imagen de Docker, para que el
+puerto esté cerrado **también en desarrollo y en test**, que es donde se
+cuelan los ciclos por un puerto que nadie escribió. Se puede cambiar por fuera
+con `AUTH_ALLOW_IN_MEMORY_STORAGE=false`.
+
 ### Swagger **no** lo tapa el guard global
 
 `globalGuard: true` cierra todas las rutas, y `/api` y `/api-json` de Swagger
@@ -632,6 +653,53 @@ de imports en cada pasada. No lo declares roto ni lo saltees.
 
 **`pnpm dev:api` sin Postgres** se queda reintentando la conexión. Es normal si el
 `compose up -d` no está levantado.
+
+## El Dockerfile
+
+`Dockerfile`, en esta carpeta, pero el contexto de build es la **raíz del
+repo**: `docker build -f apps/services/monolith/Dockerfile .`, y así desde la
+raíz. Cuatro etapas: `base` → `deps` → `build` → `prod-deps` → `runner`.
+
+Tres cosas que se aprenden por el camino y que no se ven leyendo el fichero:
+
+**El entry es `dist/main.js`, no `dist/index.js`.** Sale de `start:prod`, que es
+`node dist/main`.
+
+**Las migraciones corren antes de la app, con el data-source COMPILADO**:
+
+```dockerfile
+CMD ["sh", "-c", "node_modules/.bin/typeorm migration:run -d dist/database/data-source.js && exec node dist/main.js"]
+```
+
+Las dos mitades importan, y la segunda costó un rato:
+
+- El binario es `node_modules/.bin/typeorm`. El `migration:run` de `package.json`
+  usa `typeorm-ts-node-commonjs`, que necesita `ts-node` y los fuentes, y ninguno
+  de los dos existe en la imagen.
+- El data-source compilado. **El `.ts` no funciona**, ni aunque existieran los
+  fuentes: importa `./ensure-schema` sin extensión y el ts-node de TypeORM no lo
+  resuelve en ESM. Comprobado:
+  `Error: Cannot find module '.../ensure-schema' imported from .../data-source.ts`
+
+`exec` delante del `node` no es estética: sin él, el shell queda como PID 1 y no
+recibe el `SIGTERM` del apagado, así que el pod tarda 30 segundos en morir.
+
+**El healthcheck apunta a `/api`**, que es la UI de Swagger, porque el guard
+global no la tapa: `SwaggerModule.setup` la monta con `httpAdapter.get(...)`,
+fuera del router de Nest. Corre dentro del pod, así que no necesita Ingress.
+
+### Lo que no se puede comprobar desde el portátil
+
+La imagen **no se llegó a construir ahí**: el socket de Docker no da permisos.
+Lo que sí se comprobó, simulando la secuencia de comandos del `Dockerfile` en un
+directorio limpio:
+
+```
+pnpm install --frozen-lockfile --filter monolith   -> 196 paquetes, web con 0
+pnpm --filter monolith build                      -> dist/main.js
+pnpm --filter monolith deploy --prod              -> .pnpm DENTRO, typeorm presente
+componer node_modules + package.json + dist       -> AppModule carga
+```
 
 ## Verificar
 

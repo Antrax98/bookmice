@@ -240,6 +240,18 @@ outputFileTracingRoot: __dirname,
 Es el mismo apunte que tiene el `AGENTS.md` del proyecto `portfolio`, que lo
 descubrió por el camino difícil.
 
+**El `Dockerfile` de `web` todavía no existe**, y cuando exista tiene que usar
+el contexto de la **raíz del repo**, como el del monolith. Ver *El Dockerfile* en
+el `AGENTS.md` del monolith, que explica el mecanismo del workspace entero.
+
+Va antes que nada lo de `standalone`, porque sin esto el `COPY` falla con un error
+que no menciona el monorepo:
+
+```ts
+output: 'standalone',
+outputFileTracingRoot: __dirname,
+```
+
 **No hay CSS propio.** `globals.css` y `page.module.css` del `create-next-app`
 se borraron: con `CssBaseline` de MUI, que está montado en `ThemeRegistry`, los
 dos estorbaban. Si añades estilos, van en el `sx` de MUI o en un módulo nuevo,
