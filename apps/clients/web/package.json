@@ -35,6 +35,7 @@
     "@types/react-dom": "^19",
     "eslint": "^10.12.0",
     "openapi-typescript": "^7.13.0",
+    "prettier": "^3.9.10",
     "typescript": "^5",
     "typescript-eslint": "^8.71.0"
   }

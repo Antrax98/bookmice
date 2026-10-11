@@ -99,6 +99,32 @@ significa que la sesión murió: borra la cookie y manda a `/login`. Eso está e
 vez de navegar es que la sesión acaba de morir y hay que tirar el estado del
 cliente, no solo cambiar de ruta.
 
+### El navbar vive en `(public)/layout.tsx`, no en el layout raíz
+
+El navbar se decide por **dónde cuelga una página**, no por una condición dentro
+del componente. `(public)/layout.tsx` lo monta y `(auth)` no, y con eso `/login`
+y `/register` se quedan sin barra sin escribir ni un `if`.
+
+**No lo muevas al layout raíz** para que aparezca en todas partes: entonces
+habría que condicionarlo, y volvería a ser una decisión en runtime en vez de una
+de estructura.
+
+`AppNavbar` es un **Server Component** y tiene que serlo: decide si hay sesión
+leyendo la cookie, y la cookie es `httpOnly`, así que el navegador no la ve. Si
+fuera un componente cliente, habría que exponerle el estado de sesión, que es
+justo lo que la cookie `httpOnly` evita.
+
+Lo que sí necesita JavaScript (el botón de salir) está en `LogoutButton`, dentro
+de `src/components/`.
+
+Con sesión llama a `GET /me`. **Un 401 ahí no es un error**, es una cookie
+caducada: se pinta el navbar de invitado. Si propagara el error, la portada
+entera dejaría de pintar para cualquiera que tuviera una sesión vieja, que es
+normal que pase.
+
+`avatarUrl` **siempre** es `null` por ahora, porque el alta no pide avatar. De ahí
+las iniciales: es el caso normal, no la excepción.
+
 ### El proxy es un reenviador
 
 `app/api/proxy/route.ts` acepta un `?endpoint=` y lo reenvía al backend. Hay
@@ -131,7 +157,7 @@ no cómo se obtiene.
 Un apunte de por qué el contrato va en vivo, que no tiene nada que ver con esto:
 `@nestjs/swagger/plugin` es un transformador de compilador, y `ts-node` no lo
 aplica, así que el `openapi.json` que se commiteaba salía con los DTO vacíos.
-Ver *Habla con el backend por el contrato* más arriba.
+Ver _Habla con el backend por el contrato_ más arriba.
 
 ## Comandos
 

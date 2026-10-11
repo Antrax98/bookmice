@@ -25,11 +25,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
-    <html
-      lang="es"
-      className={roboto.variable}
-      style={{ colorScheme: 'dark' }}
-    >
+    <html lang="es" className={roboto.variable} style={{ colorScheme: 'dark' }}>
       <body>
         <AppRouterCacheProvider>
           <ThemeRegistry>{children}</ThemeRegistry>

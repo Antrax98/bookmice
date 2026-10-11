@@ -59,7 +59,9 @@ async function withTimeout(run: (signal: AbortSignal) => Promise<Response>) {
     return await run(controller.signal);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('La petición tardó demasiado. Inténtalo de nuevo.', { cause: error });
+      throw new Error('La petición tardó demasiado. Inténtalo de nuevo.', {
+        cause: error,
+      });
     }
     throw error;
   } finally {

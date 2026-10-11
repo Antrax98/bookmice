@@ -44,5 +44,5 @@ el número aparece aquí escrito y no solo referenciado: para que se vea raro
 cuando deje de cuadrar.
 
 El aviso completo, con el porqué de los bytes, está en el `AGENTS.md` del
-monolith, en *`maxBytes` sale en el openapi como `maxLength`, y no son lo
-mismo*.
+monolith, en _`maxBytes` sale en el openapi como `maxLength`, y no son lo
+mismo_.
