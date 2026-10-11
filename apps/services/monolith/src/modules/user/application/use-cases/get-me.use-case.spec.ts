@@ -19,7 +19,6 @@ const USUARIO: UserProps = {
   email: 'lector@example.com',
   username: 'lector_prueba',
   isActive: true,
-  emailVerified: false,
   createdAt: new Date('2026-10-01'),
   updatedAt: new Date('2026-10-01'),
 };
