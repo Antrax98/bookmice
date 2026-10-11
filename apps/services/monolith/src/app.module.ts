@@ -42,7 +42,6 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     // se importara, su `DataSource` sin conexión competiría con el real y
     // ganaría la resolución de tokens. Este es el `DataSource` que debe ganar.
     DatabaseModule,
-    DatabaseModule,
     AuthModule,
     UserModule,
     CatalogModule,
