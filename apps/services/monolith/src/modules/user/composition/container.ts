@@ -4,6 +4,7 @@ import { TypeormTransactionRunnerAdapter } from '../../../common/database/typeor
 import { ProfileQueryPort } from '../application/ports/profile-query.port';
 import { UserQueryPort } from '../application/ports/user-query.port';
 import { CreateUserWithProfileUseCase } from '../application/use-cases/create-user-with-profile.use-case';
+import { GetMeUseCase } from '../application/use-cases/get-me.use-case';
 import { ProfileRepositoryPort } from '../domain/ports/profile-repository.port';
 import { UserCreationPort } from '../domain/ports/user-creation.port';
 import { UserRepositoryPort } from '../domain/ports/user-repository.port';
@@ -43,5 +44,6 @@ export const userBindings: Provider[] = [
 
 export const userProviders: Provider[] = [
   CreateUserWithProfileUseCase,
+  GetMeUseCase,
   ...userBindings,
 ];

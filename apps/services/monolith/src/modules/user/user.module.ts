@@ -7,6 +7,7 @@ import { CreateUserWithProfileUseCase } from './application/use-cases/create-use
 import { UserCreationPort } from './domain/ports/user-creation.port';
 import { ProfileEntity } from './infrastructure/entities/profile.entity';
 import { UserEntity } from './infrastructure/entities/user.entity';
+import { MeController } from './infrastructure/controllers/me.controller';
 
 /**
  * Superficie Nest del módulo `user`.
@@ -27,7 +28,7 @@ import { UserEntity } from './infrastructure/entities/user.entity';
  */
 @Module({
   imports: [TypeOrmModule.forFeature([UserEntity, ProfileEntity])],
-  controllers: [],
+  controllers: [MeController],
   providers: userProviders,
   // El caso de uso se exporta, y no solo el puerto, porque
   // `UserCreationAdapter` lo necesita para delegar: sin esto, `AuthModule` no

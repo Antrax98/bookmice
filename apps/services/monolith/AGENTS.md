@@ -275,6 +275,34 @@ Por eso `PersistenceScope` vive en **`src/common/domain/`** y no en el dominio d
 para pedir un handle de transacción. Compila y pasa el lint, porque las políticas
 de `boundaries` son por **tipo** de capa y no por módulo.
 
+### `GET /me` devuelve cuatro campos, y esa es la intención
+
+Existe para pintar el navbar (quién estás conectado: nombre y avatar). Vive
+en el módulo `user` y no en `auth`, y esa decisión no es estética:
+
+- el perfil es dato de `user`, así que `user` no necesita hablar con `auth` en
+  absoluto
+- el guard global ya dejó un `AuthUser` en el contexto, así que `user` no
+  necesita nada de `auth` para saber quién es el que llama
+
+**El `userId` sale de `@CurrentUser()`, no de un parámetro.** Un endpoint `me`
+que aceptara un id por parámetro sería un endpoint para leer el perfil de otro.
+
+La ruta es `/me` y no `/profile/me` a propósito: cuando llegue el perfil
+público, `/profile/:username` colisionaría con un `:username` que valiera
+`me`, y resolver por orden de declaración convierte eso en una fuente de bugs
+difíciles de ver.
+
+**Los cuatro campos son deliberados**: `userId`, `username`, `fullName` y
+`avatarUrl`. No devuelve `email`, ni `bio`, ni `location`. Un `me` que devolviera
+la fila entera de `profiles` acabaría sirviendo para extraer datos por la
+puerta de atrás, que es justo lo que los dos puertos de lectura de `user`
+existen para cerrar. Hay un test que lo comprueba.
+
+**`avatarUrl` es nullable y lo será durante meses**: el alta no pide avatar,
+así que el cliente **siempre** tiene que tener un respaldo (iniciales). Un
+`src` vacío no es un caso raro, es el caso normal.
+
 ### `user` y `profile` están en el mismo módulo, pero en tablas distintas
 
 Un módulo, dos entidades: `users` (identidad de acceso) y `profiles` (cara
