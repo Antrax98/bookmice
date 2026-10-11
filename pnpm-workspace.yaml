@@ -16,6 +16,24 @@ packages:
   - apps/*/*
   - packages/*
 
+# `pnpm deploy` **no funciona sin esto** desde pnpm v10, y lo necesitamos para
+# las imagenes de Docker.
+#
+# Lo que hace es cambiar cómo se resuelven las dependencias **entre paquetes
+# del workspace**: con `false` (lo de antes) pnpm pone un symlink, y con `true`
+# copia el código. La diferencia importa porque `pnpm deploy` construye un
+# directorio para una imagen de Docker, y un symlink que sale de ese directorio
+# no sobrevive a un `COPY`: el módulo aparece como inexistente.
+#
+# Con `--legacy` se esquivaba, pero eso es la vía antigua. Se activó esto porque
+# `packages/` va a llenarse: el plan es compartir permisos tipados entre
+# monolith y web, y ese es justo el caso en el que la inyección importa.
+#
+# Hoy no cambia nada, y eso también se comprobó: **ninguna de las dos apps depende
+# de la otra**, así que no hay nada que inyectar. Si algún día hubiera sido
+# otro, el `pnpm install` lo habría notado.
+injectWorkspacePackages: true
+
 # Los scripts de instalación de estas apps.
 #
 # Este mapa es **global**: no se puede repartir por app como estaba antes. Se
