@@ -74,6 +74,24 @@ export function authenticationOptionsFactory(
   }
 
   return {
+    /**
+     * Acepta arrancar con los stores en memoria.
+     *
+     * El default del paquete es `false`, y con `false` la aplicación **no
+     * arranca en producción**: el módulo comprueba al arrancar que cada contrato
+     * que usan las features configuradas tenga su store, y falla nombrando los
+     * que faltan.
+     *
+     * Esto está en `true` porque la fase 2 sigue pendiente. El coste está
+     * documentado donde se decide, en `config/configuration.ts`, que es el sitio
+     * donde se cambia.
+     *
+     * Lo que **no** se puede hacer es dejar esto en `false` y esperando a que
+     * alguien escriba la fase 2: el resultado es un contenedor que entra en
+     * CrashLoopBackOff con un error que habla de stores de `mfa`, en un despliegue
+     * donde nadie ha pedido MFA.
+     */
+    allowInMemoryStorage: config.get<boolean>('auth.allow_in_memory_storage'),
     accessToken: {
       key: secret,
       ttl: duracion(

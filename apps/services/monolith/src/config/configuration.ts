@@ -41,5 +41,29 @@ export default () => ({
         (process.env.NODE_ENV === 'production' ? '17' : '10'),
       10,
     ),
+    /**
+     * Si se acepta arrancar con los stores **en memoria**.
+     *
+     * Por defecto `true` **hasta que se escriba la fase 2**, y el default es
+     * una decisión, no un descuido: la fase 2 son los seis stores del paquete
+     * (sessions, refreshTokens, mfa, magicLinks, oidcStates, emailTokens)
+     * escritos en Postgres. Hasta entonces, con `false` —que es lo que el
+     * paquete trae— **la aplicación no arranca en producción**.
+     *
+     * El coste de dejarlo en `true` es concreto: las sesiones viven en la
+     * memoria del proceso, así que **cada reinicio cierra todas las sesiones**,
+     * y no se pueden tener dos réplicas porque no compartirían estado.
+     *
+     * La trampa de por qué hace falta el store de `mfa` cuando no hay MFA está
+     * en el `AGENTS.md`. El resumen: *cada login lee el store de `mfa`*, aunque
+     * no se configure segundo factor.
+     *
+     * El día que la fase 2 exista, esto pasa a `false` y se borra. Fijado en
+     * `true` aquí y no solo en la imagen de Docker para que el puerto esté
+     * cerrado **también en desarrollo y en test**, que es donde se cuelan los
+     * ciclos por un puerto que nadie escribió.
+     */
+    allow_in_memory_storage:
+      process.env.AUTH_ALLOW_IN_MEMORY_STORAGE !== 'false',
   },
 });
