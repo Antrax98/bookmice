@@ -300,6 +300,37 @@ El `tr` de `OWNER` no es decoración. Sin él, y con el usuario en mayúscula, e
 build falla **después** de todos los pasos de verificación, que es el sitio más
 caro para descubrirlo.
 
+### Las imágenes se construyen SIN caché, a propósito
+
+`docker.yml` no tiene `cache-from` ni `cache-to`. Se quitaron porque estaban
+puestos y el build falló con:
+
+```
+Cache export is not supported for the docker driver
+```
+
+Que es la forma que tiene buildx de decir **«no has puesto
+`docker/setup-buildx-action`»**. El backend `type=gha` necesita un builder de
+tipo `docker-container`, y sin ese paso `build-push-action` usa el driver `docker`
+de toda la vida, que no sabe exportar caché.
+
+El mensaje no dice «te falta un paso», dice «el driver no soporta esto», que es
+peor: no menciona ninguna action.
+
+Había un segundo motivo para quitarlos. `mode=max` guarda **todas** las capas
+intermedias de las dos imágenes, y la cuota de caché de GitHub son 10 GB por
+repositorio. Los runners gratuitos la comprimen al guardar en vez de al subir,
+así que se llena antes, y cuando se llena el `push` falla.
+
+Sin caché no hay cuota que agotar. El coste son minutos de runner por build, que
+en un homelab donde se publica por tags se paga sin mirar.
+
+**Si algún día molesta**, la vuelta es `docker/setup-buildx-action@v4` **antes**
+del login, y los `cache-to` **solo en `api`**. No en las dos: `web` no los
+amortiza porque `/` es dinámica (el navbar lee `cookies()`), así que cada build
+produce assets distintos y su caché no se reutiliza. La de la API solo cambia
+cuando cambian sus fuentes o el `Dockerfile`.
+
 ### `pnpm test` en CI es un check que no existe
 
 Los workflows usan **`test:cov`**, y no por gusto. Un `pnpm test` a secas no

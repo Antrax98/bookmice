@@ -142,6 +142,30 @@ jobs:
       # contexto de build es la raíz del repo, no la carpeta de la app: es un
       # workspace de pnpm con un único lockfile y sin él `pnpm install
       # --frozen-lockfile` no tiene contra qué trabajar.
+      #
+      # **Sin `cache-from` ni `cache-to`, a propósito.** Estaban puestos y el
+      # build falló:
+      #
+      #   Cache export is not supported for the docker driver
+      #
+      # Que es la manera que tiene buildx de decir «no has puesto
+      # `docker/setup-buildx-action`». El backend `type=gha` necesita un builder
+      # `docker-container`, y sin ese paso `build-push-action` usa el driver
+      # `docker` de toda la vida, que no exporta caché. El mensaje no dice
+      # «te falta un paso», dice «el driver no soporta esto», que es peor.
+      #
+      # Quitarlos también quita el otro problema que traían: `mode=max` guarda
+      # **todas** las capas intermedias de las dos imágenes, y la cuota de caché
+      # de GitHub son 10 GB por repositorio. Los runners gratuitos la comprimen
+      # al guardar en vez de al subir, así que se llena antes. Con el caché
+      # fuera no hay cuota que agotar ni un `push` que falle por no caber.
+      #
+      # El coste son minutos de runner en cada build. En un homelab donde se
+      # publica por tags, que son unos cuantos al mes, se paga sin mirar.
+      # Si algún día molesta, la vuelta es `docker/setup-buildx-action@v4` antes
+      # del login, y los `cache-to` **solo en `api`**: `web` no los amortiza
+      # porque `/` es dinámica (el navbar lee `cookies()`), así que cada build
+      # produce assets distintos y su caché no se reutiliza.
       - name: Construir y subir la API
         uses: docker/build-push-action@v7
         with:
@@ -151,8 +175,6 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.OWNER }}/bookmice-api:${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.OWNER }}/bookmice-api:${{ env.VERSION }}
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,mode=max,scope=api
 
       - name: Construir y subir el front
         uses: docker/build-push-action@v7
@@ -163,5 +185,3 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.OWNER }}/bookmice-web:${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.OWNER }}/bookmice-web:${{ env.VERSION }}
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
